@@ -51,22 +51,6 @@ def _build_list_of_strings(
             proposal.append("")
         proposal[i] += text
 
-    # Add packs to proposal if any
-    if bettor.pack_amount > 0:
-        pack_text = f"📦 {bettor.pack_amount} Pack{'s' if bettor.pack_amount != 1 else ''}"
-        if bettor.locked:
-            text = f"- *{pack_text}*\n"
-        else:
-            text = f"- {pack_text}\n"
-        if bettor.cancelled:
-            text = f"~~{text}~~"
-
-        if len(text) + len(proposal[i]) > 950:
-            # move to a new list element
-            i += 1
-            proposal.append("")
-        proposal[i] += text
-
     if not proposal[0]:
         proposal[0] = "*Empty*"
 

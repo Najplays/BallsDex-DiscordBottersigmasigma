@@ -167,7 +167,6 @@ class Bet(commands.GroupCog):
         interaction: discord.Interaction["ballsdexBot"],
         countryball: BallInstanceTransform | None = None,
         special: SpecialEnabledTransform | None = None,
-        packs: int | None = None,
     ):
         """
         Add a countryball and/or packs to the ongoing bet.
@@ -178,8 +177,6 @@ class Bet(commands.GroupCog):
             The countryball you want to add to your proposal
         special: Special
             Filter the results of autocompletion to a special event. Ignored afterwards.
-        packs: int
-            Number of packs to add to your proposal
         """
         bet, bettor = self.get_bet(interaction)
         if not bet or not bettor:
@@ -193,54 +190,10 @@ class Bet(commands.GroupCog):
             )
             return
 
-        # Handle pack addition
-        if packs is not None:
-            if packs <= 0:
-                await interaction.response.send_message(
-                    "Pack amount must be greater than 0.", ephemeral=True
-                )
-                return
-
-            # Check if user has enough packs in wallet
-            current_pack_bet = getattr(bettor, 'pack_amount', 0)
-            
-            # Access the wallet_balance from the packs module
-            try:
-                # Import from the packs module where wallet_balance is defined
-                from ballsdex.packages.packs.cog import wallet_balance
-                available_packs = wallet_balance[interaction.user.id]
-            except (ImportError, ModuleNotFoundError):
-                # Fallback: try to find wallet_balance in loaded modules
-                import sys
-                available_packs = 0
-                for module_name, module in sys.modules.items():
-                    if 'packs' in module_name and hasattr(module, 'wallet_balance'):
-                        wallet_balance = getattr(module, 'wallet_balance')
-                        available_packs = wallet_balance[interaction.user.id]
-                        break
-            
-            if current_pack_bet + packs > available_packs:
-                await interaction.response.send_message(
-                    f"You don't have enough packs! You have {available_packs} packs, "
-                    f"already betting {current_pack_bet}, and trying to add {packs} more.",
-                    ephemeral=True
-                )
-                return
-
-            await interaction.response.defer(thinking=True, ephemeral=True)
-            if not hasattr(bettor, 'pack_amount'):
-                bettor.pack_amount = 0
-            bettor.pack_amount += packs
-            await interaction.followup.send(
-                f"Added {packs} packs to your proposal. Total packs: {bettor.pack_amount}",
-                ephemeral=True
-            )
-            return
-
         # Handle ball addition
         if not countryball:
             await interaction.response.send_message(
-                f"Please specify a {settings.collectible_name} or pack amount to add.", ephemeral=True
+                f"Please specify a {settings.collectible_name} to add.", ephemeral=True
             )
             return
         if not countryball.is_tradeable:

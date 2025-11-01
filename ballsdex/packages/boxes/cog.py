@@ -160,6 +160,16 @@ class Claim(commands.GroupCog, name="packs"):
             
             # Mark the queue task as done, allowing it to move to the next item
             self.pack_queue.task_done()
+
+        # Compatibility shim — place this inside the Claim cog class,
+    # at the same indentation level as multipackly and other methods.
+    async def _process_multipackly(self, user_id, packs, interaction):
+        """
+        Compatibility shim: forwards calls to the real worker method.
+        This fixes the 'no attribute _process_multipackly' error without changing
+        your existing worker implementation name.
+        """
+        return await self._process_multipackly_and_clean_up(user_id, packs, interaction)
     
     async def _process_multipackly_and_clean_up(self, user_id, packs, interaction):
         """
@@ -220,6 +230,58 @@ class Claim(commands.GroupCog, name="packs"):
             return None
 
         return random.choice(choices)
+
+        # put this inside your Cog class (same indentation as other methods)
+    async def safe_send_pinged_embed(self, interaction: discord.Interaction, user: discord.User, embed: discord.Embed, *, content_mention: str | None = None):
+        """
+        Safely send an embed that pings `user`. Tries:
+        1) interaction.response.send_message (if available)
+        2) interaction.followup.send
+        3) interaction.channel.send (last resort)
+        Uses AllowedMentions(users=True) so the mention actually notifies.
+        """
+        allowed = discord.AllowedMentions(users=True, roles=False, everyone=False)
+        content = content_mention or user.mention
+
+        # 1) Try to send as the interaction response if it hasn't been used
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(content=content, embed=embed, allowed_mentions=allowed)
+                return
+        except discord.InteractionResponded:
+            # already responded between check and send; fall through to followup
+            pass
+        except Exception:
+            # some other error — fall back to followup
+            pass
+
+        # 2) Try followup (works if the interaction was already responded to)
+        try:
+            await interaction.followup.send(content=content, embed=embed, allowed_mentions=allowed)
+            return
+        except discord.NotFound:
+            # interaction invalid/expired; fall back to channel send
+            pass
+        except Exception:
+            # other followup error -> try channel fallback
+            pass
+
+        # 3) Final fallback: send directly to the channel
+        try:
+            if interaction.channel:
+                await interaction.channel.send(content=content, embed=embed, allowed_mentions=allowed)
+                return
+        except Exception:
+            # give up but log if possible
+            try:
+                if hasattr(self, "bot") and getattr(self.bot, "logger", None):
+                    self.bot.logger.exception("safe_send_pinged_embed: all send attempts failed")
+                else:
+                    import traceback, sys
+                    print("safe_send_pinged_embed: all send attempts failed", file=sys.stderr)
+                    traceback.print_exc()
+            except Exception:
+                pass
 
     def check_daily_usage(self, user_id: str) -> tuple[bool, int]:
         """
@@ -655,16 +717,12 @@ class Claim(commands.GroupCog, name="packs"):
         await msg.edit(embed=walkout_embed, attachments=[file], view=view)
         file.close()
 
-    @app_commands.command(
-        name="multipackly",
-        description="Claim multiple footballers from the multipackly!"
-    )
+    @app_commands.command(name="multipackly", description="Claim multiple footballers from the multipackly!")
     @app_commands.describe(packs="Number of packs to open (1-75)")
     @app_commands.checks.cooldown(1, 60, key=lambda i: i.user.id)
-    async def multipackly(self, interaction, packs: int):
+    async def multipackly(self, interaction: discord.Interaction, packs: int):
         user_id = str(interaction.user.id)
 
-        # ----------------- ERROR CHECKS -----------------
         min_creation = datetime.now(timezone.utc) - timedelta(days=14)
         if interaction.user.created_at > min_creation:
             await interaction.response.send_message(
@@ -673,9 +731,11 @@ class Claim(commands.GroupCog, name="packs"):
             )
             return
 
+        # Ensure user starts with 1 pack if no balance is set
         if user_id not in wallet_balance:
             wallet_balance[user_id] = 1
 
+        # Validate pack number
         if packs < 1 or packs > 75:
             await interaction.response.send_message(
                 "You can only open between 1 and 75 packs!",
@@ -690,248 +750,108 @@ class Claim(commands.GroupCog, name="packs"):
             )
             return
 
-        if user_id in self.active_users:
-            await interaction.response.send_message(
-                "You already have a multipackly opening in progress!",
-                ephemeral=True
-            )
-            return
-
-        # Deduct packs immediately
+        # Deduct packs
         wallet_balance[user_id] -= packs
 
-        # Add user to queue and mark active
-        self.active_users.add(user_id)
-        await self.pack_queue.put((user_id, packs, interaction))
-
-        # ephemeral confirmation only
-        await interaction.response.send_message(
-            f"✅ Your {packs} packs have been added to the queue! You will receive an embed when your packs open.",
-            ephemeral=True
+        # Create the first embed (opening animation)
+        first_embed = discord.Embed(
+            title="🎁 Opening Multipackly...",
+            description="Get ready to reveal your footballers!",
+            color=discord.Color.gold()
         )
+        first_embed.set_thumbnail(url=interaction.user.display_avatar.url)
+        first_embed.set_footer(text="FootballDex MultiPacklys")
 
-    # ---------------- THE INSTANCE METHOD (must be here) ----------------
-    async def _process_multipackly(self, user_id, packs, interaction):
-        """
-        This method is an instance method on Claim. Workers call self._process_multipackly(...)
-        so it *must* live inside the Claim class (indented).
-        """
-        # quick config
-        DETAILED_LIMIT = 75
-        BATCH_SIZE = 5
-        EMBED_SLEEP = 1.5
-        SUMMARY_ATTACHMENT_NAME = "multipackly_results.txt"
+        # Send the first embed
+        await interaction.response.send_message(embed=first_embed)
+        message = await interaction.original_response()
 
-        # 1) send a visible queued message in channel (we'll edit this)
-        queued_embed = discord.Embed(
-            title="⏳ Multipackly Queue",
-            description="You're in the queue! Your packs will open automatically. Feel free to do other commands.",
-            color=discord.Color.orange()
-        )
-        queued_embed.set_thumbnail(url=interaction.user.display_avatar.url)
-        queued_embed.set_footer(text="FootballDex MultiPacklys")
-        message = await interaction.channel.send(embed=queued_embed)
+        pulled_balls = []
 
-        # 2) short ready embed
-        ready_embed = discord.Embed(
-            title="✅ Ready to Open Multipackly!",
-            description=f"You can now open **{packs} packs**!",
-            color=discord.Color.green()
-        )
-        ready_embed.set_thumbnail(url=interaction.user.display_avatar.url)
-        ready_embed.set_footer(text="FootballDex MultiPacklys")
-        await message.edit(embed=ready_embed)
-        await asyncio.sleep(2)
+        special_counts = {}
 
-        # 3) choose balls
-        player, _ = await Player.get_or_create(discord_id=str(user_id))
-        balls = []
+
+        # Small pause to simulate animation
+        await asyncio.sleep(4)
+
+        # Reveal footballers one by one
         for _ in range(packs):
+            player, _ = await Player.get_or_create(discord_id=str(interaction.user.id))
             ball = await self.get_random_ball(player)
+
             if not ball:
                 await interaction.followup.send("No footballers are available.", ephemeral=True)
                 return
-            balls.append(ball)
 
-        # 4) prepare valid specials once
-        now = datetime.now(timezone.utc)
-        specials_raw = await Special.filter(hidden=False).all()
-        valid_specials = [
-            s for s in specials_raw
-            if (s.start_date is None or s.start_date <= now) and (s.end_date is None or s.end_date >= now)
-        ]
+            # Get random special for this pack
+            special = await self.get_random_special()
 
-        # 5) decide special per ball using special.rarity probability
-        specials_for_instances = []
-        if valid_specials:
-            for _ in balls:
-                candidate = random.choice(valid_specials)
-                if random.random() < (candidate.rarity or 0):
-                    specials_for_instances.append(candidate)
-                else:
-                    specials_for_instances.append(None)
-        else:
-            specials_for_instances = [None] * len(balls)
-
-        # 6) bulk create BallInstance objects
-        instances = [
-            BallInstance(
+            # Create an instance of the ball for the user
+            instance = await BallInstance.create(
                 ball=ball,
                 player=player,
-                special=specials_for_instances[idx],
                 attack_bonus=random.randint(-20, 20),
-                health_bonus=random.randint(-20, 20)
-            ) for idx, ball in enumerate(balls)
-        ]
-        await BallInstance.bulk_create(instances)
-
-        # 7) detailed vs compact
-        compact_mode = packs > DETAILED_LIMIT
-
-        if not compact_mode:
-            # detailed animation
-            pulled = []
-            for i in range(0, len(balls), BATCH_SIZE):
-                batch = balls[i:i + BATCH_SIZE]
-                pulled.extend([b.country for b in batch])
-
-                description_lines = []
-                for j, ball in enumerate(batch):
-                    idx = i + j
-                    regime_name = getattr(ball.cached_regime, "name", "Unknown")
-                    special_inst = specials_for_instances[idx]
-                    special_text = f"✨ Special: {special_inst.name}" if special_inst else ""
-
-                    single_block = (
-                        f"🌟 **Rarity:** {ball.rarity}\n"
-                        f"⚽ **Footballer:** {ball.country}\n"
-                        f"💳 **Card:** {regime_name}\n"
-                        f"⚔ {ball.attack} | ❤️ {ball.health}\n"
-                        f"{special_text}\n"
-                        f"━━━━━━━━━━"
-                    )
-                    description_lines.append(single_block)
-
-                embed = discord.Embed(
-                    title=f"🏆 Packs {i+1}-{i+len(batch)} revealed!",
-                    description="\n".join(description_lines),
-                    color=discord.Color.random()
-                )
-                embed.set_thumbnail(url=interaction.user.display_avatar.url)
-                embed.set_footer(text="FootballDex Pack Opening")
-                await message.edit(embed=embed)
-                await asyncio.sleep(EMBED_SLEEP)
-
-            balance = wallet_balance.get(user_id, 0)
-            final_embed = discord.Embed(
-                title="🎉 All Footballers Revealed!",
-                description=f"Your Multi-Packly has been done!\n\n**{', '.join(pulled)}**\nNew Balance: {balance}",
-                color=discord.Color.green()
+                health_bonus=random.randint(-20, 20),
+                special=special,
             )
-            final_embed.set_footer(text="FootballDex MultiPacklys")
-            await message.edit(embed=final_embed)
 
-        else:
-            # compact summary + attachment
-            rarity_counts = Counter(str(b.rarity) for b in balls)
-            specials_list = [s.name for s in specials_for_instances if s]
-            try:
-                sorted_balls = sorted(balls, key=lambda b: float(b.rarity), reverse=True)
-            except Exception:
-                sorted_balls = balls[:]
-            HIGHLIGHT_LIMIT = 5
-            highlights = [f"{b.country} ({b.rarity})" for b in sorted_balls[:HIGHLIGHT_LIMIT]]
-
-            desc = ["📦 **Compact Multipackly Summary**", f"Opened: **{packs}** packs"]
-            desc.append("\n**Rarity counts:**")
-            for r, cnt in rarity_counts.most_common():
-                desc.append(f"- {r}: {cnt}")
-            if specials_list:
-                desc.append(f"\n✨ **Specials obtained ({len(specials_list)}):** {', '.join(specials_list[:HIGHLIGHT_LIMIT])}")
-            if highlights:
-                desc.append(f"\n🏅 **Highlights (top {min(HIGHLIGHT_LIMIT, len(highlights))}):**")
-                desc.extend(highlights)
-
-            compact_embed = discord.Embed(
-                title="🧾 Multipackly Summary (Compact)",
-                description="\n".join(desc),
-                color=discord.Color.blurple()
-            )
-            compact_embed.set_thumbnail(url=interaction.user.display_avatar.url)
-            compact_embed.set_footer(text="FootballDex MultiPacklys")
-            await message.edit(embed=compact_embed)
-
-            lines = []
-            for idx, ball in enumerate(balls):
-                regime_name = getattr(ball.cached_regime, "name", "Unknown")
-                sp = specials_for_instances[idx]
-                sp_text = sp.name if sp else ""
-                lines.append(f"{idx+1}. {ball.country} | rarity: {ball.rarity} | card: {regime_name} | atk: {ball.attack} | hp: {ball.health} | special: {sp_text}")
-
-            content = "\n".join(lines)
-            file_bytes = io.BytesIO(content.encode("utf-8"))
-            file_bytes.seek(0)
-            discord_file = discord.File(fp=file_bytes, filename=SUMMARY_ATTACHMENT_NAME)
-
-            dm_sent = False
-            try:
-                dm = await interaction.user.create_dm()
-                dm_bytes = io.BytesIO(content.encode("utf-8"))
-                dm_bytes.seek(0)
-                dm_file = discord.File(fp=dm_bytes, filename=SUMMARY_ATTACHMENT_NAME)
-                await dm.send(embed=compact_embed, file=dm_file)
-                dm_sent = True
-            except Exception:
-                dm_sent = False
-
-            if dm_sent:
-                # DM succeeded, short ephemeral confirmation
-                try:
-                    await interaction.followup.send(
-                        embed=discord.Embed(
-                            title="✅ Multipackly complete and results sent to your DMs",
-                            description="Alfie worked to send your full results to your DMs. Highlights are shown above.",
-                            color=discord.Color.green()
-                        ),
-                        ephemeral=True
-                    )
-                except Exception:
-                    pass
-            else:
-                # DM failed -> send chunked ephemeral text (reliable & private)
-                try:
-                    # chunk into safe-size codeblocks for ephemeral messages
-                    CHUNK_SIZE = 1900
-                    MAX_CHUNKS = 8   # avoid spamming many messages; tune this as needed
-                    chunks = [content[i:i+CHUNK_SIZE] for i in range(0, len(content), CHUNK_SIZE)]
-
-                    if len(chunks) <= MAX_CHUNKS:
-                        for chunk in chunks:
-                            await interaction.followup.send(content=f"```{chunk}```", ephemeral=True)
-                    else:
-                        # too many chunks: send a preview ephemerally and post ONE public file as a last resort
-                        preview = "".join(chunks[:MAX_CHUNKS-1])
-                        await interaction.followup.send(
-                            content=f"✅ Multipackly complete, results are long. Showing a preview (ephemeral):\n```{preview}```\nFull results attached publicly below (single message).",
-                            ephemeral=True
-                        )
-
-                        # single public attachment
-                        public_bytes = io.BytesIO(content.encode("utf-8"))
-                        public_bytes.seek(0)
-                        public_file = discord.File(fp=public_bytes, filename=SUMMARY_ATTACHMENT_NAME)
-                        await interaction.channel.send("Full multipackly results (public):", file=public_file)
-
-                except Exception:
-                    # single public file if ephemeral fails for some reason
+            # Create the walkout embed
+            special_info = ""
+            if special:
+                special_emoji = ""
+                if special.emoji:
                     try:
-                        public_bytes = io.BytesIO(content.encode("utf-8"))
-                        public_bytes.seek(0)
-                        public_file = discord.File(fp=public_bytes, filename=SUMMARY_ATTACHMENT_NAME)
-                        await interaction.channel.send("Full multipackly results:", file=public_file)
-                    except Exception:
-                        # give up. nothing else we can do...
-                        pass
+                        emoji_id = int(special.emoji)
+                        special_emoji = self.bot.get_emoji(emoji_id) or "⚡"
+                    except ValueError:
+                        special_emoji = special.emoji
+                else:
+                    special_emoji = "⚡"
+                special_info = f"\n{special_emoji} **Special:** {special.name}"
+
+            if special:
+                special_counts[special.name] = special_counts.get(special.name, 0) + 1
+
+            walkout_embed = discord.Embed(
+                title=f"🏆 You pulled {ball.country}!",
+                description=f"**Rarity:** {ball.rarity}\n⚽ **Attack:** {ball.attack}\n❤️ **Health:** {ball.health}{special_info}",
+                color=discord.Color.random()
+            )
+            walkout_embed.set_thumbnail(url=interaction.user.display_avatar.url)
+            walkout_embed.set_footer(text="FootballDex Pack Opening")
+
+            # Edit the message to show the walkout
+            await message.edit(embed=walkout_embed)
+
+            pulled_balls.append(ball)
+            balance = wallet_balance.get(user_id, 0)
+
+            await asyncio.sleep(0.5)  # Pause between each reveal
+
+            special_summary = ""
+            if special_counts:
+                special_summary = "\n\n**Specials Pulled:**\n" + "\n".join(f"**{name}** ({count})" for name, count in special_counts.items())
+
+
+            top_5 = sorted(pulled_balls, key=lambda b: b.rarity, reverse=True)[:5]
+            top_5_summary = "\n**Top 5 Pulls:**\n" + ", ".join(f"**{b.country}**" for b in top_5)
+
+
+        # Final message after all reveals
+        final_embed = discord.Embed(
+        title="🎉 All Footballers Revealed!",
+        description=(
+        f"Your Multi-Packly has been done!\n\n"
+        f"*Here is what you got in your multipackly:*\n"
+        f"**{', '.join(b.country for b in pulled_balls)}!**\n"
+        f"{top_5_summary}\n"
+        f"{special_summary}\n"
+        f"**New Packly Balance: {balance}**"
+        ),
+        color=discord.Color.green()
+)
+        final_embed.set_footer(text="FootballDex MultiPacklys")
+        await message.edit(embed=final_embed)
 
 
     # Command to add packs to a user's wallet
@@ -957,19 +877,22 @@ class Claim(commands.GroupCog, name="packs"):
         wallet_balance[target_user_id] += packs
 
         embed = discord.Embed(
-            title="FootballDex Packs Added!",
+            title="📦 Pack Added Successfully!",
             description=(
-                f"{interaction.user.mention} has added **{packs}** pack(s) to {user.mention}'s wallet.\n"
-                f"🪙 **{user.name}'s New Balance**: `{wallet_balance[target_user_id]} packs`"
+                f"**{interaction.user.display_name}** has added you **{packs}** pack(s)! 🎁\n\n"
+                f"🪙 **Your New Balance:** `{wallet_balance[target_user_id]} packs`"
             ),
             color=discord.Color.green()
         )
-        embed.set_footer(text="Packly System")
-        embed.set_thumbnail(url=user.display_avatar.url)
+        embed.set_footer(text="FootballDex Wallet System")
+        embed.set_thumbnail(url=user.display_avatar.url)  # show recipient's avatar
 
-        await interaction.response.send_message(embed=embed)
+        allowed = discord.AllowedMentions(users=True, roles=False, everyone=False)
+        mention_content = f"{user.mention}"
+
+        await self.safe_send_pinged_embed(interaction, user, embed, content_mention=f"{user.mention}")
         
-            # Command to remove packs from a user's wallet
+        # Command to remove packs from a user's wallet
     @app_commands.command(name="owners-remove", description="Remove packs from another user's wallet")
     async def ownerspacklyremove(self, interaction: discord.Interaction, user: discord.User, packs: int):
         user_id = str(interaction.user.id)
