@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("ballsdex.packages.countryballs")
 
+SPAWN_CHANCE_RANGE = (40, 55)
+
 CachedMessage = namedtuple("CachedMessage", ["content", "author_id"])
 
 
@@ -99,16 +101,14 @@ class SpawnCooldown:
 
     time: datetime
     # initialize partially started, to reduce the dead time after starting the bot
-    scaled_message_count: float = field(
-        default_factory=lambda: settings.spawn_chance_range[0] // 2
-    )
-    threshold: int = field(default_factory=lambda: random.randint(*settings.spawn_chance_range))
+    scaled_message_count: float = field(default=SPAWN_CHANCE_RANGE[0] // 2)
+    threshold: int = field(default_factory=lambda: random.randint(*SPAWN_CHANCE_RANGE))
     lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
     message_cache: deque[CachedMessage] = field(default_factory=lambda: deque(maxlen=100))
 
     def reset(self, time: datetime):
         self.scaled_message_count = 1.0
-        self.threshold = random.randint(*settings.spawn_chance_range)
+        self.threshold = random.randint(*SPAWN_CHANCE_RANGE)
         try:
             self.lock.release()
         except RuntimeError:  # lock is not acquired

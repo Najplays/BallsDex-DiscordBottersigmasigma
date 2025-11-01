@@ -23,7 +23,6 @@ from ballsdex.core.models import (
     balls,
     specials,
 )
-from ballsdex.core.utils.utils import can_mention
 from ballsdex.settings import settings
 
 if TYPE_CHECKING:
@@ -71,7 +70,7 @@ class CountryballNamePrompt(Modal, title=f"Catch this {settings.collectible_name
             await interaction.followup.send(
                 slow_message,
                 ephemeral=True,
-                allowed_mentions=await can_mention([player]),
+                allowed_mentions=discord.AllowedMentions(users=player.can_be_mentioned),
             )
             return
 
@@ -88,9 +87,12 @@ class CountryballNamePrompt(Modal, title=f"Catch this {settings.collectible_name
                 collectibles=settings.plural_collectible_name,
                 wrong=wrong_name,
             )
+
             await interaction.followup.send(
                 wrong_message,
-                allowed_mentions=await can_mention([player]),
+                allowed_mentions=discord.AllowedMentions(
+                    users=player.can_be_mentioned, everyone=False, roles=False
+                ),
                 ephemeral=False,
             )
             return
@@ -148,8 +150,6 @@ class BallSpawnView(View):
         self.atk_bonus: int | None = None
         self.hp_bonus: int | None = None
         self.og_id: int
-
-        self.catch_button.label = settings.catch_button_label
 
     async def interaction_check(self, interaction: discord.Interaction["BallsDexBot"], /) -> bool:
         return await interaction.client.blacklist_check(interaction)
@@ -273,9 +273,9 @@ class BallSpawnView(View):
                 )
                 return True
             else:
-                log.warning("Missing permission to spawn ball in channel %s.", channel)
+                log.error("Missing permission to spawn ball in channel %s.", channel)
         except discord.Forbidden:
-            log.warning(f"Missing permission to spawn ball in channel {channel}.")
+            log.error(f"Missing permission to spawn ball in channel {channel}.")
         except discord.HTTPException:
             log.error("Failed to spawn ball", exc_info=True)
         return False
@@ -299,6 +299,8 @@ class BallSpawnView(View):
             possible_names = (self.name.lower(), *self.model.catch_names.split(";"))
         else:
             possible_names = (self.name.lower(),)
+        if self.model.translations:
+            possible_names += tuple(x.lower() for x in self.model.translations.split(";"))
         cname = text.lower().strip()
         # Remove fancy unicode characters like ’ to replace to '
         cname = cname.replace("\u2019", "'")
