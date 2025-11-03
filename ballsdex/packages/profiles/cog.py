@@ -99,7 +99,7 @@ class Profiles(commands.GroupCog, name="profile"):
 
 
     @app_commands.command(name="view", description="View a user's profile")
-    @app_commands.checks.cooldown(1, 30, key=lambda i: i.user.id)
+    @app_commands.checks.cooldown(1, 120, key=lambda i: i.user.id)
     async def view_profile(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
         await interaction.response.defer()
         user = user or interaction.user
@@ -115,12 +115,25 @@ class Profiles(commands.GroupCog, name="profile"):
         profile = self.get_profile(user.id)
         data = await BallInstance.filter(player=player)
 
-        days = 7 
-        data_recent = await BallInstance.filter(
-            player=player,
-            catch_date__gte=datetime.now() - timedelta(days=days)
-        )
+        days = 7
+        now_cutoff = datetime.now() - timedelta(days=days)
 
+        # total number of balls
+        total_count = await BallInstance.filter(player=player).count()
+
+        # number caught in the last days
+        recent_count = await BallInstance.filter(player=player, catch_date__gte=now_cutoff).count()
+
+        # servers caught in during recent window: query only server_id values
+        recent_server_ids = await BallInstance.filter(
+            player=player,
+            catch_date__gte=now_cutoff
+        ).values_list('server_id', flat=True)
+
+        # make a set and ignore falsy/None server_ids
+        recent_servers_count = len({sid for sid in recent_server_ids if sid})
+
+        # special count (DB COUNT)
         special_count = await BallInstance.filter(player=player, special=True).count()
 
         # Determine rank based on total number of balls
@@ -151,17 +164,17 @@ class Profiles(commands.GroupCog, name="profile"):
         )
         embed.add_field(
             name=f"🎉 Footballers Caught ({days}d)",
-            value=str(len(data_recent)),
+            value=str(recent_count),
             inline=True
         )
         embed.add_field(
             name=f"🌍 Servers Caught In ({days}d)",
-            value=len(set(ball.server_id for ball in data_recent if ball.server_id)),
+            value=str(recent_servers_count),
             inline=True
         )
         embed.add_field(
             name=f"📈 Total Foootballers Caught",
-            value=str(len(data)),
+            value=str(total_count),
             inline=True
         )
         embed.add_field(

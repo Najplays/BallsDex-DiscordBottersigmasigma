@@ -37,7 +37,8 @@ from collections import defaultdict
 
 # Owners who can give packs
 ownersid =[
-     749658746535280771
+    749658746535280771,
+    767663084890226689
 ]
 
 
@@ -55,7 +56,7 @@ class Owners(commands.GroupCog, name="owners"):
 
     async def get_random_ball(self, player: Player) -> Ball | None:
         owned_ids = await BallInstance.filter(player=player).values_list("ball_id", flat=True)
-        all_balls = await Ball.filter(rarity__gte=0.5, rarity__lte=30.0).all()
+        all_balls = await Ball.filter(rarity__gte=0.03, rarity__lte=30.0, enabled=True).all()
 
         if not all_balls:
             return None
@@ -82,7 +83,7 @@ class Owners(commands.GroupCog, name="owners"):
 
     async def getdasigmaballmate(self, player: Player) -> Ball | None:
         owned_ids = await BallInstance.filter(player=player).values_list("ball_id", flat=True)
-        all_balls = await Ball.filter(rarity__gte=0.05, rarity__lte=5.0).all() # same with the get_random_balls
+        all_balls = await Ball.filter(rarity__gte=0.03, rarity__lte=5.0, enabled=True).all() # same with the get_random_balls
 
         if not all_balls:
             return None

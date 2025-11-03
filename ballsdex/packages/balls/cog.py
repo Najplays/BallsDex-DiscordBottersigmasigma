@@ -32,6 +32,7 @@ from ballsdex.core.utils.sorting import SortingChoices, sort_balls
 from ballsdex.core.utils.transformers import (
     BallEnabledTransform,
     BallInstanceTransform,
+    BallTransform,
     SpecialEnabledTransform,
     TradeCommandType,
     RegimeTransform,
@@ -201,7 +202,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
 
 
     @app_commands.command()
-    @app_commands.checks.cooldown(1, 10, key=lambda i: i.user.id)
+    @app_commands.checks.cooldown(1, 45, key=lambda i: i.user.id)
     async def list(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -271,14 +272,19 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         else:
             countryballs = await query.order_by("-favorite")
 
+        regime_txt = str(regime) if regime else ""
         if len(countryballs) < 1:
             ball_txt = countryball.country if countryball else ""
             special_txt = special if special else ""
-            regime_txt = regime.name if regime else ""
 
-            # Build combined filter text
-            filter_parts = [part for part in [special_txt, ball_txt, regime_txt] if part]
-            combined = " ".join(filter_parts) if filter_parts else ""
+            if special_txt and ball_txt:
+                combined = f"{special_txt} {ball_txt}"
+            elif special_txt:
+                combined = special_txt
+            elif ball_txt:
+                combined = ball_txt
+            else:
+                combined = ""
 
             if user_obj == interaction.user:
                 await interaction.followup.send(
@@ -1034,21 +1040,21 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             await interaction.followup.send(
                 embed=embed,
                 content=f"{interaction.user.mention} you just gave a {settings.collectible_name} to {user.mention}!",
-                allowed_mentions=discord.AllowedMentions(users=new_player.can_be_mentioned)
+                allowed_mentions=discord.AllowedMentions(users=[user])
             )
         else:
             await interaction.followup.send(
                 embed=embed,
                 content=f"{interaction.user.mention} you just gave a {settings.collectible_name} to {user.mention}!",
-                allowed_mentions=discord.AllowedMentions(users=new_player.can_be_mentioned)
-            )
+                allowed_mentions=discord.AllowedMentions(users=[user])
+            )       
         await countryball.unlock()
 
     @app_commands.command()
     async def count(
         self,
         interaction: discord.Interaction["BallsDexBot"],
-        countryball: BallEnabledTransform | None = None,
+        countryball: BallTransform | None = None,
         special: SpecialEnabledTransform | None = None,
         current_server: bool = False,
     ):
@@ -1283,7 +1289,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
     async def collection(
         self,
         interaction: discord.Interaction["BallsDexBot"],
-        countryball: BallEnabledTransform | None = None,
+        countryball: BallTransform | None = None,
         ephemeral: bool = False,
     ):
         """

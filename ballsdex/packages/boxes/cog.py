@@ -833,7 +833,7 @@ class Claim(commands.GroupCog, name="packs"):
                 special_summary = "\n\n**Specials Pulled:**\n" + "\n".join(f"**{name}** ({count})" for name, count in special_counts.items())
 
 
-            top_5 = sorted(pulled_balls, key=lambda b: b.rarity, reverse=True)[:5]
+            top_5 = sorted(pulled_balls, key=lambda b: b.rarity, reverse=False)[:5]
             top_5_summary = "\n**Top 5 Pulls:**\n" + ", ".join(f"**{b.country}**" for b in top_5)
 
 
