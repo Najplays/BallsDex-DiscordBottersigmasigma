@@ -17,6 +17,7 @@ from ballsdex.core.utils.transformers import (
     BallEnabledTransform,
     BallInstanceTransform,
     SpecialEnabledTransform,
+    BallTransform,
     TradeCommandType,
 )
 from ballsdex.packages.bet.bet_user import BettingUser
@@ -42,7 +43,6 @@ class Bet(commands.GroupCog):
     def get_bet(
         self,
         interaction: discord.Interaction["ballsdexBot"] | None = None,
-        *,
         channel: discord.TextChannel | None = None,
         user: discord.User | discord.Member = MISSING,
     ) -> tuple[any, BettingUser] | tuple[None, None]:
@@ -169,7 +169,7 @@ class Bet(commands.GroupCog):
         special: SpecialEnabledTransform | None = None,
     ):
         """
-        Add a countryball and/or packs to the ongoing bet.
+        Add a countryball to the ongoing bet.
 
         Parameters
         ----------
@@ -242,7 +242,7 @@ class Bet(commands.GroupCog):
     async def bulk_add(
         self,
         interaction: discord.Interaction["ballsdexBot"],
-        countryball: BallEnabledTransform | None = None,
+        countryball: BallTransform | None = None,
         sort: SortingChoices | None = None,
         special: SpecialEnabledTransform | None = None,
     ):
@@ -299,10 +299,9 @@ class Bet(commands.GroupCog):
         interaction: discord.Interaction["ballsdexBot"],
         countryball: BallInstanceTransform | None = None,
         special: SpecialEnabledTransform | None = None,
-        packs: int | None = None,
     ):
         """
-        Remove a countryball and/or packs from what you proposed in the ongoing bet.
+        Remove a countryball from what you proposed in the ongoing bet.
 
         Parameters
         ----------
@@ -310,8 +309,6 @@ class Bet(commands.GroupCog):
             The countryball you want to remove from your proposal
         special: Special
             Filter the results of autocompletion to a special event. Ignored afterwards.
-        packs: int
-            Number of packs to remove from your proposal
         """
         bet, bettor = self.get_bet(interaction)
         if not bet or not bettor:
@@ -327,32 +324,10 @@ class Bet(commands.GroupCog):
             )
             return
 
-        # Handle pack removal
-        if packs is not None:
-            if packs <= 0:
-                await interaction.response.send_message(
-                    "Pack amount must be greater than 0.", ephemeral=True
-                )
-                return
-
-            current_pack_bet = getattr(bettor, 'pack_amount', 0)
-            if packs > current_pack_bet:
-                await interaction.response.send_message(
-                    f"You only have {current_pack_bet} packs in your proposal.", ephemeral=True
-                )
-                return
-
-            bettor.pack_amount -= packs
-            await interaction.response.send_message(
-                f"Removed {packs} packs from your proposal. Remaining packs: {bettor.pack_amount}",
-                ephemeral=True
-            )
-            return
-
         # Handle ball removal
         if not countryball:
             await interaction.response.send_message(
-                f"Please specify a {settings.collectible_name} or pack amount to remove.", ephemeral=True
+                f"Please specify a {settings.collectible_name} to remove.", ephemeral=True
             )
             return
 
@@ -433,13 +408,6 @@ class Bet(commands.GroupCog):
                 )
                 return
 
-        target_pack_amount = getattr(target_bettor, 'pack_amount', 0)
-        if not target_bettor.proposal and target_pack_amount == 0:
-            await interaction.response.send_message(
-                f"{target_bettor.user.name} has no items in their proposal.", ephemeral=True
-            )
-            return
-
         sorted_balls = sort_balls(sort, target_bettor.proposal, reverse=reverse)
         
         # Use the CountryballsViewer if available, otherwise create a simple embed
@@ -484,15 +452,12 @@ class Bet(commands.GroupCog):
             title="FootballDex Bet Information",
             color=discord.Colour.gold()
         )
-        
-        bettor1_packs = getattr(bet.bettor1, 'pack_amount', 0)
-        bettor2_packs = getattr(bet.bettor2, 'pack_amount', 0)
+
         
         embed.add_field(
             name="Bettor 1",
             value=f"{bet.bettor1.user.mention}\n"
-                  f"Balls: {len(bet.bettor1.proposal)}\n"
-                  f"Packs: {bettor1_packs}\n"
+                  f"Players: {len(bet.bettor1.proposal)}\n"
                   f"Status: {'🔒 Locked' if bet.bettor1.locked else '✏️ Editing'}"
                   f"{'✅ Accepted' if bet.bettor1.accepted else ''}",
             inline=True
@@ -501,18 +466,16 @@ class Bet(commands.GroupCog):
         embed.add_field(
             name="Bettor 2", 
             value=f"{bet.bettor2.user.mention}\n"
-                  f"Balls: {len(bet.bettor2.proposal)}\n"
-                  f"Packs: {bettor2_packs}\n"
+                  f"Players: {len(bet.bettor2.proposal)}\n"
                   f"Status: {'🔒 Locked' if bet.bettor2.locked else '✏️ Editing'}"
                   f"{'✅ Accepted' if bet.bettor2.accepted else ''}",
             inline=True
         )
         
         total_balls = len(bet.bettor1.proposal) + len(bet.bettor2.proposal)
-        total_packs = bettor1_packs + bettor2_packs
         embed.add_field(
             name="Total Items at Stake",
-            value=f"{total_balls} balls" + (f", {total_packs} packs" if total_packs > 0 else "") + "\n*Winner takes all!*",
+            value=f"**{total_balls} Players" + "\nWinner takes all!**",
             inline=False
         )
 

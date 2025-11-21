@@ -147,7 +147,7 @@ def fill_bet_embed_fields(
                 name=bettor1_name,
                 value=(
                     f"Bet too long, only showing last page:\n{bettor1_proposal[-1]}"
-                    f"\nTotal: {len(bettor1.proposal)} balls + {bettor1.pack_amount} packs"
+                    f"\nTotal: {len(bettor1.proposal)} players"
                 ),
                 inline=True,
             )
@@ -155,7 +155,7 @@ def fill_bet_embed_fields(
                 name=bettor2_name,
                 value=(
                     f"Bet too long, only showing last page:\n{bettor2_proposal[-1]}\n"
-                    f"Total: {len(bettor2.proposal)} balls + {bettor2.pack_amount} packs"
+                    f"Total: {len(bettor2.proposal)} players"
                 ),
                 inline=True,
             )

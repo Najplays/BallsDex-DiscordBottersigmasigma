@@ -15,7 +15,6 @@ class BettingUser:
     user: "discord.User | discord.Member"
     player: "Player"
     proposal: list["BallInstance"] = field(default_factory=list)
-    pack_amount: int = field(default=0)  # Number of packs being bet
     locked: bool = False
     cancelled: bool = False
     accepted: bool = False
@@ -25,7 +24,6 @@ class BettingUser:
     def clear_proposal(self):
         """Clear all items from the proposal."""
         self.proposal.clear()
-        self.pack_amount = 0
 
     @property
     def total_value(self) -> str:
@@ -36,8 +34,6 @@ class BettingUser:
             ball_count = len(self.proposal)
             parts.append(f"{ball_count} ball{'s' if ball_count != 1 else ''}")
         
-        if self.pack_amount > 0:
-            parts.append(f"{self.pack_amount} pack{'s' if self.pack_amount != 1 else ''}")
         
         if not parts:
             return "Nothing"
@@ -46,7 +42,7 @@ class BettingUser:
 
     def has_items(self) -> bool:
         """Check if the user has any items in their proposal."""
-        return len(self.proposal) > 0 or self.pack_amount > 0
+        return len(self.proposal)
 
     @classmethod
     async def from_player(

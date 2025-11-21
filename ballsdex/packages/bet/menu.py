@@ -243,14 +243,14 @@ class BetMenu:
         self.embed.title = f"{settings.plural_collectible_name.title()} FootballDex Betting"
         self.embed.color = discord.Colour.gold()
         self.embed.description = (
-            f"Add or remove {settings.plural_collectible_name} and packs you want to bet "
+            f"Add or remove {settings.plural_collectible_name} to bet "
             f"using the {add_command} and {remove_command} commands.\n"
             "Once you're finished, click the lock button below to confirm your proposal.\n"
             "You can also lock with nothing if you're receiving a gift.\n\n"
             "*This bet will timeout "
             f"{format_dt(utcnow() + timedelta(minutes=30), style='R')}.*\n\n"
             f"Use the {view_command} command to see the full"
-            f" list of {settings.plural_collectible_name} and packs."
+            f" list of {settings.plural_collectible_name}."
         )
         self.embed.set_footer(
             text="This message is updated every 15 seconds, "
@@ -338,7 +338,7 @@ class BetMenu:
             self.embed.description = (
                 "Both users have locked their proposals. "
                 "**Please confirm to start the FootballDex Bet!**\n\n"
-                "*Winner takes all balls and packs from both players.*"
+                "*Winner takes all players from both users.*"
             )
             await self.message.edit(embed=self.embed, view=self.current_view)
 
@@ -367,48 +367,6 @@ class BetMenu:
                     await ball.save()
                     await ball.unlock()
 
-                # Transfer packs to winner
-                total_packs = self.bettor1.pack_amount + self.bettor2.pack_amount
-                if total_packs > 0:
-                    # Update wallet balance using the packs module
-                    try:
-                        # Import from the packs module where wallet_balance is defined
-                        from ballsdex.packages.packs.cog import wallet_balance
-                        
-                        winner_id = winner.user.id
-                        loser_id = loser.user.id
-                        
-                        # Winner gets all packs
-                        wallet_balance[winner_id] += total_packs
-                        # Loser loses their bet packs
-                        wallet_balance[loser_id] -= loser.pack_amount
-                        
-                        # Ensure loser doesn't go negative
-                        if wallet_balance[loser_id] < 0:
-                            wallet_balance[loser_id] = 0
-                            
-                    except (ImportError, ModuleNotFoundError):
-                        # Fallback: search through loaded modules
-                        import sys
-                        wallet_balance = None
-                        for module_name, module in sys.modules.items():
-                            if 'packs' in module_name and hasattr(module, 'wallet_balance'):
-                                wallet_balance = getattr(module, 'wallet_balance')
-                                break
-                        
-                        if wallet_balance is not None:
-                            winner_id = winner.user.id
-                            loser_id = loser.user.id
-                            wallet_balance[winner_id] += total_packs
-                            wallet_balance[loser_id] -= loser.pack_amount
-                            if wallet_balance[loser_id] < 0:
-                                wallet_balance[loser_id] = 0
-                        else:
-                            log.warning("Could not find wallet_balance system for pack transfer")
-                    except Exception as e:
-                        log.warning(f"Failed to transfer packs in bet: {e}")
-                        pass
-
                 # Clear proposals
                 self.bettor1.clear_proposal()
                 self.bettor2.clear_proposal()
@@ -418,9 +376,8 @@ class BetMenu:
                 self.embed.description = (
                     f"**FootballDex Bet concluded!**\n\n"
                     f"🏆 **{winner.user.name}** won the bet!\n"
-                    f"💸 **{loser.user.name}** lost the bet.\n\n"
-                    f"**Winner takes all {len(all_balls)} balls"
-                    f"{f' and {total_packs} packs' if total_packs > 0 else ''}!**"
+                    f"💔 **{loser.user.name}** lost the bet.\n\n"
+                    f"**Winner takes all {len(all_balls)} players"
                 )
                 self.embed.color = discord.Colour.green()
 
@@ -444,7 +401,7 @@ class BetMenu:
                     )
                     log_embed.add_field(
                         name="Items Won", 
-                        value=f"{len(all_balls)} balls" + (f", {total_packs} packs" if total_packs > 0 else ""), 
+                        value=f"{len(all_balls)} players", 
                         inline=True
                     )
                     await log_channel.send(embed=log_embed)
@@ -676,9 +633,6 @@ class BetViewMenu(Pages):
             description_parts = []
             if player.proposal:
                 description_parts.append(f"{len(player.proposal)} {plural_check}")
-            if player.pack_amount > 0:
-                pack_text = f"{player.pack_amount} pack{'s' if player.pack_amount != 1 else ''}"
-                description_parts.append(pack_text)
             
             description = f"ID: {user_obj.id}"
             if description_parts:
@@ -710,14 +664,9 @@ class BetViewMenu(Pages):
         )
         ball_instances = bet_player.proposal
         
-        if len(ball_instances) == 0 and bet_player.pack_amount == 0:
+        if len(ball_instances) == 0:
             return await interaction.followup.send(
-                f"{bet_player.user} has not added any {settings.plural_collectible_name} or packs.",
-                ephemeral=True,
-            )
-        elif len(ball_instances) == 0:
-            return await interaction.followup.send(
-                f"{bet_player.user} has only added {bet_player.pack_amount} packs to their bet.",
+                f"{bet_player.user} has not added any {settings.plural_collectible_name}.",
                 ephemeral=True,
             )
 

@@ -214,7 +214,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         regime: RegimeTransform | None = None,
     ):
         """
-        List your countryballs.
+        List your countryballs with optional filters and sorting.
 
         Parameters
         ----------
@@ -246,12 +246,12 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                     f"{user_obj.name} doesn't have any {settings.plural_collectible_name} yet."
                 )
             return
+
         if user is not None:
             if await inventory_privacy(self.bot, interaction, player, user_obj) is False:
                 return
 
         interaction_player, _ = await Player.get_or_create(discord_id=interaction.user.id)
-
         blocked = await player.is_blocked(interaction_player)
         if blocked and not is_staff(interaction):
             await interaction.followup.send(
@@ -259,7 +259,10 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             )
             return
 
+        # --- PREFETCH related objects used later to avoid N+1 queries ---
         await player.fetch_related("balls")
+
+        # --- Build query with filters ---
         query = player.balls.all()
         if countryball:
             query = query.filter(ball__id=countryball.pk)
@@ -267,24 +270,25 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             query = query.filter(special=special)
         if regime:
             query = query.filter(ball__regime=regime)
-        if sort:
-            countryballs = await sort_balls(sort, query)
-        else:
-            countryballs = await query.order_by("-favorite")
 
-        regime_txt = str(regime) if regime else ""
-        if len(countryballs) < 1:
+        # --- Sort ---
+        if sort:
+            maybe_sorted = await sort_balls(sort, query)
+        else:
+            maybe_sorted = query.order_by("-favorite")
+
+        # --- Count total items ---
+        if hasattr(maybe_sorted, "count") and not isinstance(maybe_sorted, list):
+            total = await maybe_sorted.count()
+        else:
+            total = len(maybe_sorted)
+
+        if total < 1:
             ball_txt = countryball.country if countryball else ""
             special_txt = special if special else ""
+            regime_txt = regime.name if regime else ""
 
-            if special_txt and ball_txt:
-                combined = f"{special_txt} {ball_txt}"
-            elif special_txt:
-                combined = special_txt
-            elif ball_txt:
-                combined = ball_txt
-            else:
-                combined = ""
+            combined = " ".join(part for part in [special_txt, ball_txt, regime_txt] if part)
 
             if user_obj == interaction.user:
                 await interaction.followup.send(
@@ -292,20 +296,43 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                 )
             else:
                 await interaction.followup.send(
-                    f"{user_obj.name} doesn't have any {combined} "
-                    f"{settings.plural_collectible_name} yet."
+                    f"{user_obj.name} doesn't have any {combined} {settings.plural_collectible_name} yet."
                 )
             return
-        if reverse:
-            countryballs.reverse()
 
-        paginator = CountryballsViewer(interaction, countryballs)
-        if user_obj == interaction.user:
-            await paginator.start()
+        # Limit to 1000 pages max (25 items per page)
+        MAX_PAGES = 750
+        ITEMS_PER_PAGE = 25
+        MAX_ITEMS = MAX_PAGES * ITEMS_PER_PAGE
+
+        info_content = None  # always called/defined
+
+        # Early
+        if total < 1:
+            # sends no balls message
+            return  # exit automatically
+
+        # Slice and limit
+        if isinstance(maybe_sorted, list):
+            countryballs_list = maybe_sorted[:MAX_ITEMS]
+            if len(maybe_sorted) > MAX_ITEMS:
+                info_content = f"Showing first {MAX_ITEMS} of {len(maybe_sorted)} {settings.plural_collectible_name}. Refine filters to see more."
         else:
-            await paginator.start(
-                content=f"Viewing {user_obj.name}'s {settings.plural_collectible_name}"
-            )
+            countryballs_list = list(await maybe_sorted.limit(MAX_ITEMS))
+            if total > MAX_ITEMS:
+                info_content = f"Showing first {MAX_ITEMS} of {total} {settings.plural_collectible_name}. Refine filters to see more."
+
+        # Make sure paginator is defined safely
+        paginator = CountryballsViewer(interaction, countryballs_list)
+
+        # start paginator only after it’s defined
+        if user_obj == interaction.user:
+            await paginator.start(content=info_content)
+        else:
+            content = f"Viewing {user_obj.name}'s {settings.plural_collectible_name}"
+            if info_content:
+                content = f"{content} — {info_content}"
+            await paginator.start(content=content)
 
     @app_commands.command()
     @app_commands.checks.cooldown(1, 60, key=lambda i: i.user.id)
@@ -622,55 +649,6 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             
             pages = Pages(source=paginator, interaction=interaction, compact=True)
             await pages.start()
-
-    @app_commands.command()
-    @app_commands.checks.cooldown(1, 60, key=lambda i: i.user.id)
-    async def rarity(
-        self,
-        interaction: discord.Interaction,
-        reverse: bool = False,
-    ):
-        """
-        Show the rarity list of players
-
-        Parameters
-        ----------
-        reverse: bool
-            Whether to show the rarity list in reverse
-        """
-
-        # Filter enabled collectibles
-        enabledCollectibles = [x for x in balls.values() if x.enabled]
-
-        # Group collectibles by rarity
-        rarityToCollectibles = {}
-        for collectible in enabledCollectibles:
-            rarity = collectible.rarity
-            if rarity not in rarityToCollectibles:
-                rarityToCollectibles[rarity] = []
-            rarityToCollectibles[rarity].append(collectible)
-
-        # Sort the rarityToCollectibles dictionary by rarity
-        sortedRarities = sorted(rarityToCollectibles.keys(), reverse=reverse)
-    
-        # Display collectibles grouped by rarity
-        entries = []
-        for rarity in sortedRarities:
-            collectible_names = "\n".join(
-                [
-                    f"\u200b ⋄ {c.country}"
-                    for c in rarityToCollectibles[rarity]
-                ]
-            )
-            entry = (f"★ Rarity: {rarity}", f"{collectible_names}")
-            entries.append(entry)
-
-        per_page = 5 
-        source = FieldPageSource(entries, per_page=per_page, inline=False, clear_description=False)
-        source.embed.title = f"Rarity List:"
-        discord.Colour.green()
-        pages = Pages(source=source, interaction=interaction, compact=False)
-        await pages.start()       
 
     @app_commands.command()
     @app_commands.checks.cooldown(1, 60, key=lambda i: i.user.id)
@@ -1040,14 +1018,14 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             await interaction.followup.send(
                 embed=embed,
                 content=f"{interaction.user.mention} you just gave a {settings.collectible_name} to {user.mention}!",
-                allowed_mentions=discord.AllowedMentions(users=[user])
+                allowed_mentions=discord.AllowedMentions(users=new_player.can_be_mentioned)
             )
         else:
             await interaction.followup.send(
                 embed=embed,
                 content=f"{interaction.user.mention} you just gave a {settings.collectible_name} to {user.mention}!",
-                allowed_mentions=discord.AllowedMentions(users=[user])
-            )       
+                allowed_mentions=discord.AllowedMentions(users=new_player.can_be_mentioned)
+            )
         await countryball.unlock()
 
     @app_commands.command()

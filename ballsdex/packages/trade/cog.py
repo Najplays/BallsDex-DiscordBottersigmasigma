@@ -18,6 +18,7 @@ from ballsdex.core.utils.transformers import (
     BallEnabledTransform,
     BallInstanceTransform,
     SpecialEnabledTransform,
+    BallTransform,
     TradeCommandType,
 )
 from ballsdex.packages.trade.display import TradeViewFormat
@@ -101,6 +102,7 @@ class Trade(commands.GroupCog):
         return (trade, trader)
 
     @app_commands.command()
+    @app_commands.checks.cooldown(1, 15, key=lambda i: i.user.id)
     async def begin(self, interaction: discord.Interaction["BallsDexBot"], user: discord.User):
         """
         Begin a trade with the chosen user.
@@ -162,6 +164,7 @@ class Trade(commands.GroupCog):
         await interaction.response.send_message("Trade started!", ephemeral=True)
 
     @app_commands.command(extras={"trade": TradeCommandType.PICK})
+    @app_commands.checks.cooldown(1, 15, key=lambda i: i.user.id)
     async def add(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -234,10 +237,11 @@ class Trade(commands.GroupCog):
         )
 
     @bulk.command(name="add", extras={"trade": TradeCommandType.PICK})
+    @app_commands.checks.cooldown(1, 15, key=lambda i: i.user.id)
     async def bulk_add(
         self,
         interaction: discord.Interaction["BallsDexBot"],
-        countryball: BallEnabledTransform | None = None,
+        countryball: BallTransform | None = None,
         sort: SortingChoices | None = None,
         special: SpecialEnabledTransform | None = None,
         filter: FilteringChoices | None = None,
