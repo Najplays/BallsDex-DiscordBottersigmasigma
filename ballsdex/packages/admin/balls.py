@@ -208,10 +208,22 @@ class Balls(app_commands.Group):
                 countryball,
                 channel or interaction.channel,  # type: ignore
                 n,
+                special=special,
+                atk_bonus=atk_bonus,
+                hp_bonus=hp_bonus,
             )
+            # include the special/bonus details in the log for clarity
+            special_attrs = []
+            if special is not None:
+                special_attrs.append(f"special={special.name}")
+            if atk_bonus is not None:
+                special_attrs.append(f"atk={atk_bonus}")
+            if hp_bonus is not None:
+                special_attrs.append(f"hp={hp_bonus}")
             await log_action(
-                f"{interaction.user} spawned {settings.collectible_name}"
-                f" {countryball or 'random'} {n} times in {channel or interaction.channel}.",
+                f"{interaction.user} spawned {settings.collectible_name} "
+                f"{countryball or 'random'} {n} times in {channel or interaction.channel}"
+                f"{' (' + ', '.join(special_attrs) + ')' if special_attrs else ''}.",
                 interaction.client,
             )
 
