@@ -20,6 +20,7 @@ from ballsdex.core.utils.transformers import (
     SpecialEnabledTransform,
     BallTransform,
     TradeCommandType,
+    RegimeTransform,
 )
 from ballsdex.packages.trade.display import TradeViewFormat
 from ballsdex.packages.trade.menu import BulkAddView, TradeMenu, TradeViewMenu
@@ -102,7 +103,7 @@ class Trade(commands.GroupCog):
         return (trade, trader)
 
     @app_commands.command()
-    @app_commands.checks.cooldown(1, 15, key=lambda i: i.user.id)
+    @app_commands.checks.cooldown(1, 5, key=lambda i: i.user.id)
     async def begin(self, interaction: discord.Interaction["BallsDexBot"], user: discord.User):
         """
         Begin a trade with the chosen user.
@@ -164,7 +165,6 @@ class Trade(commands.GroupCog):
         await interaction.response.send_message("Trade started!", ephemeral=True)
 
     @app_commands.command(extras={"trade": TradeCommandType.PICK})
-    @app_commands.checks.cooldown(1, 15, key=lambda i: i.user.id)
     async def add(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -237,7 +237,6 @@ class Trade(commands.GroupCog):
         )
 
     @bulk.command(name="add", extras={"trade": TradeCommandType.PICK})
-    @app_commands.checks.cooldown(1, 15, key=lambda i: i.user.id)
     async def bulk_add(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -245,6 +244,7 @@ class Trade(commands.GroupCog):
         sort: SortingChoices | None = None,
         special: SpecialEnabledTransform | None = None,
         filter: FilteringChoices | None = None,
+        regime: RegimeTransform | None = None,  # for cards
     ):
         """
         Bulk add countryballs to the ongoing trade, with paramaters to aid with searching.
@@ -259,6 +259,8 @@ class Trade(commands.GroupCog):
             Filter the results to a special event
         filter: FilteringChoices
             Filter the results to a specific filter
+        regime: Regime
+            Filter by regime
         """
         await interaction.response.defer(ephemeral=True, thinking=True)
         trade, trader = self.get_trade(interaction)
@@ -272,28 +274,43 @@ class Trade(commands.GroupCog):
                 ephemeral=True,
             )
             return
+
         query = BallInstance.filter(player__discord_id=interaction.user.id)
+
         if countryball:
             query = query.filter(ball=countryball)
         if special:
             query = query.filter(special=special)
+        if regime:
+            query = query.filter(ball__regime=regime)
         if sort:
             query = sort_balls(sort, query)
         if filter:
             query = filter_balls(filter, query, interaction.guild_id)
+
         balls = await query
         if not balls:
             await interaction.followup.send(
-                f"No {settings.plural_collectible_name} found.", ephemeral=True
+                f"No {settings.plural_collectible_name} found.", 
+                ephemeral=True
             )
             return
+
         balls = [x for x in balls if x.is_tradeable]
+
+        # safe checkings
+        if not balls:
+            await interaction.followup.send(
+                f"No {settings.plural_collectible_name} match those filters.", 
+                ephemeral=True
+            )
+            return
 
         view = BulkAddView(interaction, balls, self)  # type: ignore
         await view.start(
             content=f"Select the {settings.plural_collectible_name} you want to add "
-            "to your proposal, note that the display will wipe on pagination however "
-            f"the selected {settings.plural_collectible_name} will remain."
+                    "to your proposal, note that the display will wipe on pagination however "
+                    f"the selected {settings.plural_collectible_name} will remain."
         )
 
     @app_commands.command(extras={"trade": TradeCommandType.REMOVE})

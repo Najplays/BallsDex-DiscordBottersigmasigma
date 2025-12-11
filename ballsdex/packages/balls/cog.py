@@ -148,6 +148,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         buffer.seek(0)
         return buffer
 
+    ALLOWED_USERS = [749658746535280771, 767663084890226689, 1184739489315299339, 917048116115542016, 784414771993903125]
 
     @app_commands.command(name="frame")
     @app_commands.describe(
@@ -174,23 +175,35 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
     ):
         """Apply a fancy frame overlay to your footballer."""
 
+        # Security layer
+        if interaction.user.id not in self.ALLOWED_USERS:
+
+            now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%SZ")
+
+            await interaction.response.send_message(
+                f"🚨 **UNAUTHORIZED ACCESS DETECTED** 🚨\n"
+                f"**User:** {interaction.user.mention}\n"
+                f"**User ID:** `{interaction.user.id}`\n"
+                f"**Timestamp:** `{now}` (UTC)\n\n"
+                f"🔒 This command is restricted to certified administrators.\n"
+                f"⚠️ **Your attempt has been flagged and recorded.**\n"
+                f"Further attempts may escalate to system-level alerts.",
+                ephemeral=True
+            )
+            return
         await interaction.response.defer()
 
         self.frame_memory[countryball.id] = frame.value
 
-        # Load the overlay
         overlay_path = self.OVERLAY_DIR / frame.value
         overlay_img = Image.open(overlay_path).convert("RGBA")
 
-        # Generate the image with overlay
         image, _ = draw_card(countryball, frame_overlay=overlay_img)
 
-        # Save to buffer
         buffer = BytesIO()
         image.save(buffer, format="PNG")
         buffer.seek(0)
 
-        # Prepare Discord file and embed
         file = File(fp=buffer, filename="framed_footballer.png")
         embed = Embed(
             title=f"{interaction.user.display_name}'s Footballer with {frame.name} Frame (Only visible in /players info)"
@@ -234,7 +247,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         user_obj = user or interaction.user
         await interaction.response.defer(thinking=True)
 
-        # --- Fetch player ---
+        # Fetch player
         try:
             player = await Player.get(discord_id=user_obj.id)
         except DoesNotExist:
@@ -242,19 +255,34 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             await interaction.followup.send(msg)
             return
 
-        # --- Privacy / block checks ---
-        if user is not None:
-            if await inventory_privacy(self.bot, interaction, player, user_obj) is False:
-                return
+        # Pricacy Checks
         interaction_player, _ = await Player.get_or_create(discord_id=interaction.user.id)
-        blocked = await player.is_blocked(interaction_player)
-        if blocked and not is_staff(interaction):
-            await interaction.followup.send(
-                "You cannot view the list of a user that has you blocked.", ephemeral=True
-            )
-            return
 
-        # --- SQL filters only ---
+        # Viewing someone else's inventory
+        if user is not None and user_obj.id != interaction.user.id:
+
+            # 1) block check hard
+            is_blocked = await player.is_blocked(interaction_player)
+
+            if is_blocked and not is_staff(interaction):
+                await interaction.followup.send(
+                    "You cannot view this user's countryballs.",
+                    ephemeral=True
+                )
+                return
+
+            # 2) pricaxy check very hard like mbappe
+            allowed = await inventory_privacy(self.bot, interaction, player, user_obj)
+
+            # sometime will return none or false...
+            if not allowed:
+                await interaction.followup.send(
+                    "This user's inventory is private.",
+                    ephemeral=True
+                )
+                return
+
+        # SQL Filter ONLY!
         query = player.balls.all()
         if countryball:
             query = query.filter(ball__id=countryball.pk)
@@ -265,27 +293,28 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
 
         total = await query.count()
         if total < 1:
-            combined = " ".join(filter(None, [special if special else "", countryball.country if countryball else "", regime.name if regime else ""]))
-            msg = f"You don't have any {combined} {settings.plural_collectible_name} yet." if user_obj == interaction.user else f"{user_obj.name} doesn't have any {combined} {settings.plural_collectible_name} yet."
-            await interaction.followup.send(msg)
-            return
+            combined = " ".join(filter(None, [
+            str(special) if special else "",
+            str(countryball.country) if countryball else "",
+            str(regime.name) if regime else ""
+        ]))
 
-        # --- Pagination limit ---
+        # Pagination limits
         MAX_PAGES = 200
         ITEMS_PER_PAGE = 25
         MAX_ITEMS = MAX_PAGES * ITEMS_PER_PAGE
 
-        # --- Sorting ---
+        # Sortings
         if sort:
             if sort == SortingChoices.duplicates:
-                # Fetch limited items first to avoid loading millions
+
                 countryballs_list = list(await query.limit(MAX_ITEMS))
 
-                # Count duplicates per ball
+                # Count the duplicates per ball
                 from collections import Counter
                 ball_counts = Counter(b.ball_id for b in countryballs_list)
 
-                # Attach duplicates count temporarily
+                # Attach duplicates count temp
                 for b in countryballs_list:
                     b._duplicates_count = ball_counts[b.ball_id]
 
@@ -293,12 +322,12 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                 countryballs_list.sort(key=lambda b: b._duplicates_count, reverse=reverse)
 
             else:
-                # SQL-level sort for real fields
+                # SQL lEVELS SORTED BY REAL FIELD
                 order_field = sort.value
                 descending = order_field.startswith("-")
                 field_name = order_field.lstrip("-")
 
-                # Apply reverse correctly
+                # Apply the reverse correctly
                 if reverse:
                     order_field = field_name if descending else f"-{field_name}"
                 else:
@@ -312,10 +341,10 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             maybe_sorted = query.order_by("-favorite")
             countryballs_list = list(await maybe_sorted.limit(MAX_ITEMS))
 
-        # --- Info content ---
+        # info content
         info_content = f"Showing first {MAX_ITEMS} of {total} {settings.plural_collectible_name}." if total > MAX_ITEMS else None
 
-        # --- Paginator ---
+        # Paginator
         paginator = CountryballsViewer(interaction, countryballs_list)
         content = info_content if user_obj == interaction.user else f"Viewing {user_obj.name}'s {settings.plural_collectible_name}" + (f" — {info_content}" if info_content else "")
         await paginator.start(content=content)
