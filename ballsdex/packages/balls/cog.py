@@ -234,23 +234,18 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         user_obj = user or interaction.user
         await interaction.response.defer(thinking=True)
 
+        # --- Fetch player ---
         try:
             player = await Player.get(discord_id=user_obj.id)
         except DoesNotExist:
-            if user_obj == interaction.user:
-                await interaction.followup.send(
-                    f"You don't have any {settings.plural_collectible_name} yet."
-                )
-            else:
-                await interaction.followup.send(
-                    f"{user_obj.name} doesn't have any {settings.plural_collectible_name} yet."
-                )
+            msg = f"You don't have any {settings.plural_collectible_name} yet." if user_obj == interaction.user else f"{user_obj.name} doesn't have any {settings.plural_collectible_name} yet."
+            await interaction.followup.send(msg)
             return
 
+        # --- Privacy / block checks ---
         if user is not None:
             if await inventory_privacy(self.bot, interaction, player, user_obj) is False:
                 return
-
         interaction_player, _ = await Player.get_or_create(discord_id=interaction.user.id)
         blocked = await player.is_blocked(interaction_player)
         if blocked and not is_staff(interaction):
@@ -259,10 +254,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             )
             return
 
-        # --- PREFETCH related objects used later to avoid N+1 queries ---
-        await player.fetch_related("balls")
-
-        # --- Build query with filters ---
+        # --- SQL filters only ---
         query = player.balls.all()
         if countryball:
             query = query.filter(ball__id=countryball.pk)
@@ -271,68 +263,62 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         if regime:
             query = query.filter(ball__regime=regime)
 
-        # --- Sort ---
-        if sort:
-            maybe_sorted = await sort_balls(sort, query)
-        else:
-            maybe_sorted = query.order_by("-favorite")
-
-        # --- Count total items ---
-        if hasattr(maybe_sorted, "count") and not isinstance(maybe_sorted, list):
-            total = await maybe_sorted.count()
-        else:
-            total = len(maybe_sorted)
-
+        total = await query.count()
         if total < 1:
-            ball_txt = countryball.country if countryball else ""
-            special_txt = special if special else ""
-            regime_txt = regime.name if regime else ""
-
-            combined = " ".join(part for part in [special_txt, ball_txt, regime_txt] if part)
-
-            if user_obj == interaction.user:
-                await interaction.followup.send(
-                    f"You don't have any {combined} {settings.plural_collectible_name} yet."
-                )
-            else:
-                await interaction.followup.send(
-                    f"{user_obj.name} doesn't have any {combined} {settings.plural_collectible_name} yet."
-                )
+            combined = " ".join(filter(None, [special if special else "", countryball.country if countryball else "", regime.name if regime else ""]))
+            msg = f"You don't have any {combined} {settings.plural_collectible_name} yet." if user_obj == interaction.user else f"{user_obj.name} doesn't have any {combined} {settings.plural_collectible_name} yet."
+            await interaction.followup.send(msg)
             return
 
-        # Limit to 1000 pages max (25 items per page)
-        MAX_PAGES = 750
+        # --- Pagination limit ---
+        MAX_PAGES = 200
         ITEMS_PER_PAGE = 25
         MAX_ITEMS = MAX_PAGES * ITEMS_PER_PAGE
 
-        info_content = None  # always called/defined
+        # --- Sorting ---
+        if sort:
+            if sort == SortingChoices.duplicates:
+                # Fetch limited items first to avoid loading millions
+                countryballs_list = list(await query.limit(MAX_ITEMS))
 
-        # Early
-        if total < 1:
-            # sends no balls message
-            return  # exit automatically
+                # Count duplicates per ball
+                from collections import Counter
+                ball_counts = Counter(b.ball_id for b in countryballs_list)
 
-        # Slice and limit
-        if isinstance(maybe_sorted, list):
-            countryballs_list = maybe_sorted[:MAX_ITEMS]
-            if len(maybe_sorted) > MAX_ITEMS:
-                info_content = f"Showing first {MAX_ITEMS} of {len(maybe_sorted)} {settings.plural_collectible_name}. Refine filters to see more."
+                # Attach duplicates count temporarily
+                for b in countryballs_list:
+                    b._duplicates_count = ball_counts[b.ball_id]
+
+                # Sort by duplicates
+                countryballs_list.sort(key=lambda b: b._duplicates_count, reverse=reverse)
+
+            else:
+                # SQL-level sort for real fields
+                order_field = sort.value
+                descending = order_field.startswith("-")
+                field_name = order_field.lstrip("-")
+
+                # Apply reverse correctly
+                if reverse:
+                    order_field = field_name if descending else f"-{field_name}"
+                else:
+                    order_field = order_field
+
+                maybe_sorted = query.order_by(order_field)
+                countryballs_list = list(await maybe_sorted.limit(MAX_ITEMS))
+
         else:
+            # Default sorting: favorite first
+            maybe_sorted = query.order_by("-favorite")
             countryballs_list = list(await maybe_sorted.limit(MAX_ITEMS))
-            if total > MAX_ITEMS:
-                info_content = f"Showing first {MAX_ITEMS} of {total} {settings.plural_collectible_name}. Refine filters to see more."
 
-        # Make sure paginator is defined safely
+        # --- Info content ---
+        info_content = f"Showing first {MAX_ITEMS} of {total} {settings.plural_collectible_name}." if total > MAX_ITEMS else None
+
+        # --- Paginator ---
         paginator = CountryballsViewer(interaction, countryballs_list)
-
-        # start paginator only after it’s defined
-        if user_obj == interaction.user:
-            await paginator.start(content=info_content)
-        else:
-            content = f"Viewing {user_obj.name}'s {settings.plural_collectible_name}"
-            if info_content:
-                content = f"{content} — {info_content}"
-            await paginator.start(content=content)
+        content = info_content if user_obj == interaction.user else f"Viewing {user_obj.name}'s {settings.plural_collectible_name}" + (f" — {info_content}" if info_content else "")
+        await paginator.start(content=content)
 
     @app_commands.command()
     @app_commands.checks.cooldown(1, 60, key=lambda i: i.user.id)
@@ -691,12 +677,12 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             entry = (f"★ Rarity: {rarity}", f"{collectible_names}")
             entries.append(entry)
 
-        per_page = 5 
+        per_page = 2
         source = FieldPageSource(entries, per_page=per_page, inline=False, clear_description=False)
         source.embed.title = f"Rarity List:"
         discord.Colour.green()
         pages = Pages(source=source, interaction=interaction, compact=False)
-        await pages.start()       
+        await pages.start()
 
     @app_commands.command()
     @app_commands.checks.cooldown(1, 5, key=lambda i: i.user.id)
@@ -837,8 +823,11 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         if not countryball:
             return
 
+        # Prevent "Unknown interaction"
+        await interaction.response.defer(ephemeral=True)
+
         if settings.max_favorites == 0:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"You cannot set favorite {settings.plural_collectible_name} in this bot."
             )
             return
@@ -847,8 +836,8 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             try:
                 player = await Player.get(discord_id=interaction.user.id).prefetch_related("balls")
             except DoesNotExist:
-                await interaction.response.send_message(
-                    f"You don't have any {settings.plural_collectible_name} yet.", ephemeral=True
+                await interaction.followup.send(
+                    f"You don't have any {settings.plural_collectible_name} yet."
                 )
                 return
 
@@ -857,30 +846,28 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                 if settings.max_favorites == 1
                 else f"{settings.plural_collectible_name}"
             )
+
             if await player.balls.filter(favorite=True).count() >= settings.max_favorites:
-                await interaction.response.send_message(
-                    f"You cannot set more than {settings.max_favorites} favorite {grammar}.",
-                    ephemeral=True,
+                await interaction.followup.send(
+                    f"You cannot set more than {settings.max_favorites} favorite {grammar}."
                 )
                 return
 
-            countryball.favorite = True  # type: ignore
+            countryball.favorite = True
             await countryball.save()
+
             emoji = self.bot.get_emoji(countryball.countryball.emoji_id) or ""
-            await interaction.response.send_message(
-                f"{emoji} `#{countryball.pk:0X}` {countryball.countryball.country} "
-                f"is now a favorite {settings.collectible_name}!",
-                ephemeral=True,
+            await interaction.followup.send(
+                f"{emoji} `#{countryball.pk:0X}` {countryball.countryball.country} is now a favorite {settings.collectible_name}!"
             )
 
         else:
-            countryball.favorite = False  # type: ignore
+            countryball.favorite = False
             await countryball.save()
+
             emoji = self.bot.get_emoji(countryball.countryball.emoji_id) or ""
-            await interaction.response.send_message(
-                f"{emoji} `#{countryball.pk:0X}` {countryball.countryball.country} "
-                f"isn't a favorite {settings.collectible_name} anymore.",
-                ephemeral=True,
+            await interaction.followup.send(
+                f"{emoji} `#{countryball.pk:0X}` {countryball.countryball.country} isn't a favorite {settings.collectible_name} anymore."
             )
 
     @app_commands.command(extras={"trade": TradeCommandType.PICK})
