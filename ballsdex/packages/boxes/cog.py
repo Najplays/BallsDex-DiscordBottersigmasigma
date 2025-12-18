@@ -216,7 +216,7 @@ class Claim(commands.GroupCog, name="packs"):
                 rarity_weight = 100  # very rare
             elif 0.1 < ball.rarity < 0.5:
                 rarity_weight = 30 # very very rare 
-            elif 0.03 <= ball.rarity <= 0.1:
+            elif 0.01 <= ball.rarity <= 0.1:
                 rarity_weight = 20  # ultra rare
 
             final_weight = base_weight * rarity_weight

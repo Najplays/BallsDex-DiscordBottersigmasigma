@@ -128,89 +128,10 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
     """
     View and manage your countryballs collection.
     """
-    OVERLAY_DIR = Path(__file__).parent / "overlay"
 
     def __init__(self, bot: "BallsDexBot"):
         self.bot = bot
         self.frame_memory = {}
-
-
-    async def apply_overlay(self, ball_instance: BallInstance, image_fp: BytesIO, overlay_filename: str) -> BytesIO:
-        overlay_path = self.OVERLAY_DIR / overlay_filename
-        overlay_img = Image.open(overlay_path).convert("RGBA")
-
-        # Regenerate the card using the draw_card function with the overlay
-        image, _ = draw_card(ball_instance, frame_overlay=overlay_img)
-
-        # Save to buffer
-        buffer = BytesIO()
-        image.save(buffer, format="PNG")
-        buffer.seek(0)
-        return buffer
-
-    ALLOWED_USERS = [749658746535280771, 767663084890226689, 1184739489315299339, 917048116115542016, 784414771993903125]
-
-    @app_commands.command(name="frame")
-    @app_commands.describe(
-        countryball="The footballer to frame",
-        frame="Choose a frame overlay"
-    )
-    @app_commands.choices(frame=[
-        app_commands.Choice(name="Rainbow", value="rainbow_frame.png"),
-        app_commands.Choice(name="Sussy", value="awaken_zone_glow.png"),
-        app_commands.Choice(name="Neon", value="neon_frame.png"),
-        app_commands.Choice(name="Magure in Real Madrid", value="maguire_realmadrid.png"),
-        app_commands.Choice(name="Normal Evolution Card", value="EVOLUTIONSBASEDESIGN.png"),
-        app_commands.Choice(name="Cool Evolution Card", value="EVOLUTIONSUPGRADESDESIGN.png"),
-        app_commands.Choice(name="Shape Shifter Card", value="shapeshifterdesign.png"),
-        app_commands.Choice(name="PMO Card", value="PMOFRAME.png"),
-        app_commands.Choice(name="Classic Old Card", value="Classic_card_design.png"),
-    ])
-    @app_commands.checks.cooldown(1, 18000, key=lambda i: i.user.id)
-    async def frame(
-        self,
-        interaction: Interaction,
-        countryball: BallInstanceTransform,
-        frame: app_commands.Choice[str]
-    ):
-        """Apply a fancy frame overlay to your footballer."""
-
-        # Security layer
-        if interaction.user.id not in self.ALLOWED_USERS:
-
-            now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%SZ")
-
-            await interaction.response.send_message(
-                f"🚨 **UNAUTHORIZED ACCESS DETECTED** 🚨\n"
-                f"**User:** {interaction.user.mention}\n"
-                f"**User ID:** `{interaction.user.id}`\n"
-                f"**Timestamp:** `{now}` (UTC)\n\n"
-                f"🔒 This command is restricted to certified administrators.\n"
-                f"⚠️ **Your attempt has been flagged and recorded.**\n"
-                f"Further attempts may escalate to system-level alerts.",
-                ephemeral=True
-            )
-            return
-        await interaction.response.defer()
-
-        self.frame_memory[countryball.id] = frame.value
-
-        overlay_path = self.OVERLAY_DIR / frame.value
-        overlay_img = Image.open(overlay_path).convert("RGBA")
-
-        image, _ = draw_card(countryball, frame_overlay=overlay_img)
-
-        buffer = BytesIO()
-        image.save(buffer, format="PNG")
-        buffer.seek(0)
-
-        file = File(fp=buffer, filename="framed_footballer.png")
-        embed = Embed(
-            title=f"{interaction.user.display_name}'s Footballer with {frame.name} Frame (Only visible in /players info)"
-        )
-        embed.set_image(url="attachment://framed_footballer.png")
-
-        await interaction.followup.send(embed=embed, file=file)
 
 
 
@@ -222,7 +143,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         user: discord.User | None = None,
         sort: SortingChoices | None = None,
         reverse: bool = False,
-        countryball: BallEnabledTransform | None = None,
+        countryball: BallTransform | None = None,
         special: SpecialEnabledTransform | None = None,
         regime: RegimeTransform | None = None,
     ):
@@ -338,7 +259,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
 
         else:
             # Default sorting: favorite first
-            maybe_sorted = query.order_by("-favorite")
+            maybe_sorted = query.order_by("-favorite", "ball__country", "ball__id")
             countryballs_list = list(await maybe_sorted.limit(MAX_ITEMS))
 
         # info content
@@ -696,15 +617,17 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
 
         # Display collectibles grouped by rarity
         entries = []
+        max_len = 1000
         for rarity in sortedRarities:
-            collectible_names = "\n".join(
-                [
-                    f"\u200b ⋄ {c.country}"
-                    for c in rarityToCollectibles[rarity]
-                ]
-            )
-            entry = (f"★ Rarity: {rarity}", f"{collectible_names}")
-            entries.append(entry)
+            collectible_names = "\n".join([f"\u200b ⋄ {c.country}" for c in rarityToCollectibles[rarity]])
+
+            # Split into chunks
+            start = 0
+            while start < len(collectible_names):
+                chunk = collectible_names[start:start+max_len]
+                start += max_len
+                entry = (f"★ Rarity: {rarity}", chunk)
+                entries.append(entry)
 
         per_page = 2
         source = FieldPageSource(entries, per_page=per_page, inline=False, clear_description=False)
