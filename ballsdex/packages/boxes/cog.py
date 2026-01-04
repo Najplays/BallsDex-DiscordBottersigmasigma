@@ -55,6 +55,8 @@ last_daily_times = {}
 last_weekly_times = {}
 wallet_balance = defaultdict(int)
 packly_pool = defaultdict(int)
+active_multipackly: set[str] = set()
+multipackly_locks: dict[str, asyncio.Lock] = {}
 
 # Custom daily usage tracking - stores {user_id: {'count': int, 'first_use': datetime}}
 daily_usage_tracking = {}
@@ -66,7 +68,9 @@ ownersid = {
     784414771993903125,
     749658746535280771,
     767663084890226689,
-    1184739489315299339
+    1184739489315299339,
+    257972292645027841,
+    1119377053054148719
 }
 
 # Cooldowns
@@ -109,9 +113,6 @@ class Claim(commands.GroupCog, name="packs"):
         self.bot = bot
         self.bot_tutorial_seen = set()
         self.bot_walletturorial_seen = set()
-        self.pack_queue = asyncio.Queue()
-        self.active_users = set()
-        self.bot.loop.create_task(self._start_worker_manager())
         super().__init__()
 
     async def get_random_special(self) -> Special | None:
@@ -731,11 +732,11 @@ class Claim(commands.GroupCog, name="packs"):
             )
             return
 
-        # Ensure user starts with 1 pack if no balance is set
+        # Make sure user stars with 1 pack if new.
         if user_id not in wallet_balance:
             wallet_balance[user_id] = 1
 
-        # Validate pack number
+        # Check numbers.
         if packs < 1 or packs > 75:
             await interaction.response.send_message(
                 "You can only open between 1 and 75 packs!",
@@ -753,7 +754,7 @@ class Claim(commands.GroupCog, name="packs"):
         # Deduct packs
         wallet_balance[user_id] -= packs
 
-        # Create the first embed (opening animation)
+        # Opening embed
         first_embed = discord.Embed(
             title="🎁 Opening Multipackly...",
             description="Get ready to reveal your footballers!",
@@ -762,7 +763,6 @@ class Claim(commands.GroupCog, name="packs"):
         first_embed.set_thumbnail(url=interaction.user.display_avatar.url)
         first_embed.set_footer(text="FootballDex MultiPacklys")
 
-        # Send the first embed
         await interaction.response.send_message(embed=first_embed)
         message = await interaction.original_response()
 
@@ -778,12 +778,10 @@ class Claim(commands.GroupCog, name="packs"):
         for _ in range(packs):
             player, _ = await Player.get_or_create(discord_id=str(interaction.user.id))
             ball = await self.get_random_ball(player)
-
             if not ball:
                 await interaction.followup.send("No footballers are available.", ephemeral=True)
                 return
 
-            # Get random special for this pack
             special = await self.get_random_special()
 
             # Create an instance of the ball for the user
@@ -1001,7 +999,7 @@ class Claim(commands.GroupCog, name="packs"):
             )
 
     
-    # Command to check wallet balance
+    # Command to check wallet balance ->
     @app_commands.command(name="wallet", description="Check your wallet balance")
     @app_commands.checks.cooldown(1, 10, key=lambda i: i.user.id)
     async def wallet(self, interaction: discord.Interaction):
@@ -1024,9 +1022,9 @@ class Claim(commands.GroupCog, name="packs"):
             )
             await interaction.response.send_message(embed=tutorial_embed, ephemeral=True)
             self.bot_walletturorial_seen.add(user_id)
-            return  # Stop here, so user reads tutorial first
+            return  # End here so user is able to view the tutorial first.
         
-        # Get the user's pack balance (defaults to 0 if they haven't added any packs)
+        # Get the users pack balance:
         balance = wallet_balance.get(user_id, 0)
         
         embed = discord.Embed(
@@ -1036,5 +1034,5 @@ class Claim(commands.GroupCog, name="packs"):
         )
         embed.set_footer(text="FootballDex Wallet")
         
-        # Send the wallet balance as an embed
+        # Send wallet via embed
         await interaction.response.send_message(embed=embed, ephemeral=False)

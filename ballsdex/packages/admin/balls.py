@@ -270,7 +270,7 @@ class Balls(app_commands.Group):
         hp_bonus: int | None = None,
     ):
         """
-        Force spawn a random or specified rare countryball (rarity 0.03-2.5).
+        Force spawn a random or specified rare countryball (rarity 0.01-2.5).
 
         Parameters
         ----------
@@ -308,10 +308,10 @@ class Balls(app_commands.Group):
             return
 
         # Validate countryball rarity if specified
-        if countryball and (countryball.rarity < 0.03 or countryball.rarity > 2.4):
+        if countryball and (countryball.rarity < 0.01 or countryball.rarity > 2.4):
             await interaction.response.send_message(
                 f"The specified {settings.collectible_name} has rarity {countryball.rarity}, "
-                "which is outside the rare range (0.03-2.4). Please specify a rare "
+                "which is outside the rare range (0.01-2.4). Please specify a rare "
                 f"{settings.collectible_name} or omit this parameter for random rare selection.",
                 ephemeral=True,
             )
@@ -327,11 +327,11 @@ class Balls(app_commands.Group):
             for i in range(n):
                 if not countryball:
                     # Get random rare ball for each spawn
-                    rare_balls = await Ball.filter(rarity__gte=0.03, rarity__lte=2.5, enabled=True).all()
+                    rare_balls = await Ball.filter(rarity__gte=0.01, rarity__lte=2.5, enabled=True).all()
                     if not rare_balls:
                         await interaction.followup.edit_message(
                             "@original",
-                            content=f"No rare {settings.plural_collectible_name} (rarity 0.03-2.4) are available.",
+                            content=f"No rare {settings.plural_collectible_name} (rarity 0.01-2.4) are available.",
                         )
                         return
                     weights = [ball.rarity for ball in rare_balls]
@@ -369,8 +369,8 @@ class Balls(app_commands.Group):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         if not countryball:
-            # Get random rare ball with rarity between 0.03 and 2.4
-            rare_balls = await Ball.filter(rarity__gte=0.03, rarity__lte=2.4, enabled=True).all()
+            # Get random rare ball with rarity between 0.01 and 2.4
+            rare_balls = await Ball.filter(rarity__gte=0.01, rarity__lte=2.4, enabled=True).all()
             if not rare_balls:
                 await interaction.followup.send(
                     f"No rare {settings.plural_collectible_name} (rarity 0.03-2.4) are available.",

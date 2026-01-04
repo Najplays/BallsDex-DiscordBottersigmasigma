@@ -12,13 +12,14 @@ from tortoise.expressions import Q
 from ballsdex.core.models import BallInstance, Player
 from ballsdex.core.utils.buttons import ConfirmChoiceView
 from ballsdex.core.utils.paginator import Pages
-from ballsdex.core.utils.sorting import SortingChoices, sort_balls
+from ballsdex.core.utils.sorting import SortingChoices, sort_balls, FilteringChoices, filter_balls
 from ballsdex.core.utils.transformers import (
     BallEnabledTransform,
     BallInstanceTransform,
     SpecialEnabledTransform,
     BallTransform,
     TradeCommandType,
+    RegimeTransform,
 )
 from ballsdex.packages.bet.bet_user import BettingUser
 
@@ -245,6 +246,8 @@ class Bet(commands.GroupCog):
         countryball: BallTransform | None = None,
         sort: SortingChoices | None = None,
         special: SpecialEnabledTransform | None = None,
+        filter: FilteringChoices | None = None,
+        regime: RegimeTransform | None = None,  # for cards
     ):
         """
         Bulk add countryballs to the ongoing bet, with parameters to aid with searching.
@@ -257,6 +260,10 @@ class Bet(commands.GroupCog):
             Choose how countryballs are sorted. Can be used to show duplicates.
         special: Special
             Filter the results to a special event
+        filter: Filter
+            Filter results to a specific filter
+        regime: Regime
+            Filter results by regime
         """
         await interaction.response.defer(ephemeral=True, thinking=True)
         bet, bettor = self.get_bet(interaction)
@@ -277,6 +284,8 @@ class Bet(commands.GroupCog):
             query = query.filter(special=special)
         if sort:
             query = sort_balls(sort, query)
+        if filter:
+            query = filter_balls(filter, query, interaction.guild_id)
         balls = await query
         if not balls:
             await interaction.followup.send(

@@ -254,16 +254,16 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                 else:
                     order_field = order_field
 
-                maybe_sorted = query.order_by(order_field)
+                maybe_sorted = query.order_by(order_field, "ball__country")
                 countryballs_list = list(await maybe_sorted.limit(MAX_ITEMS))
 
         else:
             # Default sorting: favorite first
-            maybe_sorted = query.order_by("-favorite", "ball__country", "ball__id")
+            maybe_sorted = query.order_by("-favorite", "id")
             countryballs_list = list(await maybe_sorted.limit(MAX_ITEMS))
 
         # info content
-        info_content = f"Showing first {MAX_ITEMS} of {total} {settings.plural_collectible_name}." if total > MAX_ITEMS else None
+        info_content = f"Showing first **{MAX_ITEMS} of {total} {settings.plural_collectible_name}.**\n\n*Use more specific filters to find what you’re looking for.*" if total > MAX_ITEMS else None
 
         # Paginator
         paginator = CountryballsViewer(interaction, countryballs_list)
@@ -277,6 +277,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         interaction: discord.Interaction["BallsDexBot"],
         user: discord.User | None = None,
         special: SpecialEnabledTransform | None = None,
+        regime: RegimeTransform | None = None,
     ):
         """
         Show your current completion of the BallsDex.
@@ -287,6 +288,8 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             The user whose completion you want to view, if not yours.
         special: Special
             The special you want to see the completion of
+        regime: Regime
+            The regime you want to see the completion of
         """
         user_obj = user or interaction.user
         await interaction.response.defer(thinking=True)
@@ -326,6 +329,14 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                 for x, y in balls.items()
                 if y.enabled and (special.end_date is None or y.created_at < special.end_date)
             }
+        if regime:
+            filters["ball__regime"] = regime
+            bot_countryballs = {
+                x: y.emoji_id
+                for x, y in balls.items()
+                if y.enabled and y.regime_id == regime.id
+            }
+            
         if not bot_countryballs:
             await interaction.followup.send(
                 f"There are no {extra_text}{settings.plural_collectible_name}"
@@ -373,14 +384,14 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         if owned_countryballs:
             # Getting the list of emoji IDs from the IDs of the owned countryballs
             fill_fields(
-                f"Owned {settings.plural_collectible_name}",
+                f"Owned {settings.plural_collectible_name}{f' ({regime.name})' if regime else ''}",
                 set(bot_countryballs[x] for x in owned_countryballs),
             )
         else:
             entries.append((f"__**Owned {settings.plural_collectible_name}**__", "Nothing yet."))
 
         if missing := set(y for x, y in bot_countryballs.items() if x not in owned_countryballs):
-            fill_fields(f"Missing {settings.plural_collectible_name}", missing)
+            fill_fields(f"Missing {settings.plural_collectible_name}{f' ({regime.name})' if regime else ''}", missing)
         else:
             entries.append(
                 (
@@ -643,7 +654,6 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         interaction: discord.Interaction["BallsDexBot"],
         countryball: BallInstanceTransform,
         special: SpecialEnabledTransform | None = None,
-        title: str | None = None,
     ):
         """
         Display info from a specific countryball.
@@ -658,42 +668,8 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         if not countryball:
             return
         await interaction.response.defer(thinking=True)
-
-        # Get embed content, image file, and view
-        content, original_file, view = await countryball.prepare_for_message(interaction)
-
-        # Read image bytes into buffer
-        original_file.fp.seek(0)
-        file_bytes = BytesIO(original_file.fp.read())
-        original_file.close()
-
-        frame_name = self.frame_memory.get(countryball.id)
-        if frame_name:
-            # Apply the frame overlay
-            framed_buffer = await self.apply_overlay(countryball, file_bytes, frame_name)
-            file = discord.File(fp=framed_buffer, filename="framed_footballer.png")
-            image_filename = "framed_footballer.png"
-        else:
-            # Use original image
-            file_bytes.seek(0)
-            file = discord.File(fp=file_bytes, filename="footballer.png")
-            image_filename = "footballer.png"
-
-        # Create embed
-        embed = Embed(
-            title=title or f"{countryball} — Footballer Info",
-            description=content or "",
-            color=Color(random.randint(0, 0xFFFFFF))
-        )
-        embed.set_image(url=f"attachment://{image_filename}")
-
-        await interaction.followup.send(
-            content=content,
-            embed=embed,
-            file=file,
-            view=view
-        )
-        # Close original file
+        content, file, view = await countryball.prepare_for_message(interaction)
+        await interaction.followup.send(content=content, file=file, view=view)
         file.close()
 
 

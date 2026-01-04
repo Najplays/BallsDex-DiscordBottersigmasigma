@@ -246,7 +246,7 @@ class BetMenu:
             f"Add or remove {settings.plural_collectible_name} to bet "
             f"using the {add_command} and {remove_command} commands.\n"
             "Once you're finished, click the lock button below to confirm your proposal.\n"
-            "You can also lock with nothing if you're receiving a gift.\n\n"
+            "All bets are always 50/50. Timing, send order, “luck,” and other factors do not affect the outcome.\n\n"
             "*This bet will timeout "
             f"{format_dt(utcnow() + timedelta(minutes=30), style='R')}.*\n\n"
             f"Use the {view_command} command to see the full"
