@@ -318,31 +318,52 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                 return
         # Filter disabled balls, they do not count towards progression
         # Only ID and emoji is interesting for us
-        bot_countryballs = {x: y.emoji_id for x, y in balls.items() if y.enabled}
+        bot_countryballs = {}
 
-        # Set of ball IDs owned by the player
-        filters = {"player__discord_id": user_obj.id, "ball__enabled": True}
-        if special:
-            filters["special"] = special
-            bot_countryballs = {
-                x: y.emoji_id
-                for x, y in balls.items()
-                if y.enabled and (special.end_date is None or y.created_at < special.end_date)
-            }
+        for x, y in balls.items():
+            # Disabled balls are ignored unless we're filtering by regime
+            if not y.enabled and not regime:
+                continue
+            # Only include special-limited balls if a special is set
+            if special and special.end_date is not None and y.created_at >= special.end_date:
+                continue
+            # Only include regime balls if regime is set
+            if regime and y.regime_id != regime.id:
+                continue
+            bot_countryballs[x] = y.emoji_id
+
+        filters = {"player__discord_id": user_obj.id}
         if regime:
             filters["ball__regime"] = regime
-            bot_countryballs = {
-                x: y.emoji_id
-                for x, y in balls.items()
-                if y.enabled and y.regime_id == regime.id
-            }
-            
+        else:
+            filters["ball__enabled"] = True
+
+        if special:
+            filters["special"] = special
+
         if not bot_countryballs:
-            await interaction.followup.send(
-                f"There are no {extra_text}{settings.plural_collectible_name}"
-                " registered on this bot yet.",
-                ephemeral=True,
-            )
+            if special and regime:
+                msg = (
+                    f"There are no {special.name} {regime.name} "
+                    f"{settings.plural_collectible_name} registered on this bot yet."
+                )
+            elif regime:
+                msg = (
+                    f"There are no {regime.name} "
+                    f"{settings.plural_collectible_name} registered on this bot yet."
+                )
+            elif special:
+                msg = (
+                    f"There are no {special.name} "
+                    f"{settings.plural_collectible_name} registered on this bot yet."
+                )
+            else:
+                msg = (
+                    f"There are no {settings.plural_collectible_name} "
+                    f"registered on this bot yet."
+                )
+
+            await interaction.followup.send(msg, ephemeral=True)
             return
 
         owned_countryballs = set(

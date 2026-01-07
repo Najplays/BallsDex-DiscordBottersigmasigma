@@ -278,21 +278,28 @@ class Bet(commands.GroupCog):
             )
             return
         query = BallInstance.filter(player__discord_id=interaction.user.id)
+
         if countryball:
             query = query.filter(ball=countryball)
         if special:
             query = query.filter(special=special)
+        if filter:
+            query = filter_balls(filter=filter, queryset=query, guild_id=interaction.guild_id)
+        if regime:
+            query = query.filter(ball__regime=regime)
         if sort:
             query = sort_balls(sort, query)
-        if filter:
-            query = filter_balls(filter, query, interaction.guild_id)
+
         balls = await query
+
+        balls = [x for x in balls if x.is_tradeable]
+
         if not balls:
             await interaction.followup.send(
-                f"No {settings.plural_collectible_name} found.", ephemeral=True
+                "No tradeable footballers matched your filters.",
+                ephemeral=True,
             )
             return
-        balls = [x for x in balls if x.is_tradeable]
 
         from ballsdex.packages.bet.menu import BulkAddView
         view = BulkAddView(interaction, balls, self)  # type: ignore
