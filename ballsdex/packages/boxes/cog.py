@@ -720,7 +720,7 @@ class Claim(commands.GroupCog, name="packs"):
 
     @app_commands.command(name="multipackly", description="Claim multiple footballers from the multipackly!")
     @app_commands.describe(packs="Number of packs to open (1-75)")
-    @app_commands.checks.cooldown(1, 60, key=lambda i: i.user.id)
+    @app_commands.checks.cooldown(1, 300, key=lambda i: i.user.id)
     async def multipackly(self, interaction: discord.Interaction, packs: int):
         user_id = str(interaction.user.id)
 
@@ -824,7 +824,7 @@ class Claim(commands.GroupCog, name="packs"):
             pulled_balls.append(ball)
             balance = wallet_balance.get(user_id, 0)
 
-            await asyncio.sleep(0.5)  # Pause between each reveal
+            await asyncio.sleep(3)  # Pause between each reveal
 
             special_summary = ""
             if special_counts:
