@@ -38,7 +38,7 @@ from ballsdex.core.utils.transformers import (
     RegimeTransform,
 )
 from ballsdex.core.image_generator. image_gen import draw_card
-from ballsdex.core.utils.utils import inventory_privacy, is_staff
+from ballsdex.core.utils.utils import can_mention, inventory_privacy, is_staff
 from ballsdex.packages.balls.countryballs_paginator import CountryballsViewer
 from ballsdex.settings import settings
 
@@ -316,18 +316,13 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
 
             if await inventory_privacy(self.bot, interaction, player, user_obj) is False:
                 return
-        # Filter disabled balls, they do not count towards progression
-        # Only ID and emoji is interesting for us
         bot_countryballs = {}
 
         for x, y in balls.items():
-            # Disabled balls are ignored unless we're filtering by regime
             if not y.enabled and not regime:
                 continue
-            # Only include special-limited balls if a special is set
             if special and special.end_date is not None and y.created_at >= special.end_date:
                 continue
-            # Only include regime balls if regime is set
             if regime and y.regime_id != regime.id:
                 continue
             bot_countryballs[x] = y.emoji_id
@@ -369,14 +364,13 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         owned_countryballs = set(
             x[0]
             for x in await BallInstance.filter(**filters)
-            .distinct()  # Do not query everything
+            .distinct()
             .values_list("ball_id")
         )
 
         entries: list[tuple[str, str]] = []
 
         def fill_fields(title: str, emoji_ids: set[int]):
-            # check if we need to add "(continued)" to the field name
             first_field_added = False
             buffer = ""
 
@@ -387,7 +381,6 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
 
                 text = f"{emoji} "
                 if len(buffer) + len(text) > 1024:
-                    # hitting embed limits, adding an intermediate field
                     if first_field_added:
                         entries.append(("\u200b", buffer))
                     else:
@@ -396,14 +389,13 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                     buffer = ""
                 buffer += text
 
-            if buffer:  # add what's remaining
+            if buffer:
                 if first_field_added:
                     entries.append(("\u200b", buffer))
                 else:
                     entries.append((f"__**{title}**__", buffer))
 
         if owned_countryballs:
-            # Getting the list of emoji IDs from the IDs of the owned countryballs
             fill_fields(
                 f"Owned {settings.plural_collectible_name}{f' ({regime.name})' if regime else ''}",
                 set(bot_countryballs[x] for x in owned_countryballs),
@@ -420,7 +412,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                     "congratulations! :tada:**__",
                     "\u200b",
                 )
-            )  # force empty field value
+            ) 
 
         source = FieldPageSource(entries, per_page=5, inline=False, clear_description=False)
         special_str = f" ({special.name})" if special else ""
@@ -851,8 +843,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             return
         if await countryball.is_locked():
             await interaction.response.send_message(
-                f"This {settings.collectible_name} is currently locked for a trade. "
-                "Please try again later.",
+                f"This {settings.collectible_name} is currently locked for a trade. Please try again later.",
                 ephemeral=True,
             )
             return
@@ -864,8 +855,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                 cancel_message="This request has been cancelled.",
             )
             await interaction.response.send_message(
-                f"This {settings.collectible_name} is a favorite, "
-                "are you sure you want to donate it?",
+                f"This {settings.collectible_name} is a favorite, are you sure you want to donate it?",
                 view=view,
                 ephemeral=True,
             )
@@ -874,7 +864,8 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                 return
             interaction = view.interaction_response
         else:
-            await interaction.response.defer()
+            # instead of defer, send a tiny ephemeral "processing" message
+            await interaction.response.send_message("Processing donation...", ephemeral=True)
         await countryball.lock_for_trade()
         new_player, _ = await Player.get_or_create(discord_id=user.id)
         old_player = countryball.player
@@ -887,8 +878,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             return
         if new_player.donation_policy == DonationPolicy.ALWAYS_DENY:
             await interaction.followup.send(
-                "This player does not accept donations. You can use trades instead.",
-                ephemeral=True,
+                "This player does not accept donations. You can use trades instead.", ephemeral=True
             )
             await countryball.unlock()
             return
@@ -897,22 +887,17 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         if new_player.donation_policy == DonationPolicy.FRIENDS_ONLY:
             if not friendship:
                 await interaction.followup.send(
-                    "This player only accepts donations from friends, use trades instead.",
-                    ephemeral=True,
+                    "This player only accepts donations from friends, use trades instead.", ephemeral=True
                 )
                 await countryball.unlock()
                 return
         blocked = await new_player.is_blocked(old_player)
         if blocked:
-            await interaction.followup.send(
-                "You cannot interact with a user that has blocked you.", ephemeral=True
-            )
+            await interaction.followup.send("You cannot interact with a user that has blocked you.", ephemeral=True)
             await countryball.unlock()
             return
         if new_player.discord_id in self.bot.blacklist:
-            await interaction.followup.send(
-                "You cannot donate to a blacklisted user.", ephemeral=True
-            )
+            await interaction.followup.send("You cannot donate to a blacklisted user.", ephemeral=True)
             await countryball.unlock()
             return
         elif new_player.donation_policy == DonationPolicy.REQUEST_APPROVAL:
@@ -921,7 +906,7 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
                 f"{countryball.description(include_emoji=True, bot=self.bot, is_trade=True)}!\n"
                 "Do you accept this donation?",
                 view=DonationRequest(self.bot, interaction, countryball, new_player),
-                allowed_mentions=discord.AllowedMentions(users=new_player.can_be_mentioned),
+                allowed_mentions=await can_mention([new_player, old_player]),
             )
             return
 
@@ -938,29 +923,15 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             + f" (`{countryball.attack_bonus:+}%/{countryball.health_bonus:+}%`)"
         )
 
-        # Create the embed
-        embed = discord.Embed(
-            title=f"{settings.collectible_name} Given",
-            description=cb_txt,
-            color=discord.Color.green()  # You can adjust the color to your liking
-        )
-
-        # Add more fields to the embed if needed
-        embed.add_field(name="Recipient", value=f"{user.mention}", inline=True)
-        embed.add_field(name="Sender", value=f"{interaction.user.mention}", inline=True)
-
-        # If it's a favorite, use the appropriate mention
-        if favorite:
+        try:
             await interaction.followup.send(
-                embed=embed,
-                content=f"{interaction.user.mention} you just gave a {settings.collectible_name} to {user.mention}!",
-                allowed_mentions=discord.AllowedMentions(users=new_player.can_be_mentioned)
+                f"{interaction.user.mention}, you just gave the {settings.collectible_name} {cb_txt} to {user.mention}!",
+                allowed_mentions=await can_mention([new_player, old_player]),
             )
-        else:
-            await interaction.followup.send(
-                embed=embed,
-                content=f"{interaction.user.mention} you just gave a {settings.collectible_name} to {user.mention}!",
-                allowed_mentions=discord.AllowedMentions(users=new_player.can_be_mentioned)
+        except discord.errors.InteractionResponded:
+            await interaction.channel.send(
+                f"{interaction.user.mention}, you just gave the {settings.collectible_name} {cb_txt} to {user.mention}!",
+                allowed_mentions=await can_mention([new_player, old_player]),
             )
         await countryball.unlock()
 

@@ -283,12 +283,20 @@ class Bet(commands.GroupCog):
             query = query.filter(ball=countryball)
         if special:
             query = query.filter(special=special)
-        if filter:
-            query = filter_balls(filter=filter, queryset=query, guild_id=interaction.guild_id)
         if regime:
             query = query.filter(ball__regime=regime)
         if sort:
             query = sort_balls(sort, query)
+        if filter:
+            query = filter_balls(filter, query, interaction.guild_id)
+
+        total = await query.count()  # total number of balls matching filters
+
+        MAX_PAGES = 200
+        ITEMS_PER_PAGE = 25 
+        MAX_ITEMS = MAX_PAGES * ITEMS_PER_PAGE
+
+        query = query.limit(MAX_ITEMS)
 
         balls = await query
 
@@ -303,11 +311,19 @@ class Bet(commands.GroupCog):
 
         from ballsdex.packages.bet.menu import BulkAddView
         view = BulkAddView(interaction, balls, self)  # type: ignore
-        await view.start(
-            content=f"Select the {settings.plural_collectible_name} you want to add "
-            "to your bet proposal, note that the display will wipe on pagination however "
+        content_message = (
+            f"Showing first **{MAX_ITEMS}** of **{total}** {settings.plural_collectible_name}.\n\n"
+            "*Use more specific filters to find what you’re looking for.*\n\n"
+            f"Select the {settings.plural_collectible_name} you want to add to your bet proposal, "
+            "note that the display will wipe on pagination however "
+            f"the selected {settings.plural_collectible_name} will remain."
+        ) if total > MAX_ITEMS else (
+            f"Select the {settings.plural_collectible_name} you want to add to your bet proposal, "
+            "note that the display will wipe on pagination however "
             f"the selected {settings.plural_collectible_name} will remain."
         )
+
+        await view.start(content=content_message)
 
     @app_commands.command(extras={"trade": TradeCommandType.REMOVE})
     async def remove(

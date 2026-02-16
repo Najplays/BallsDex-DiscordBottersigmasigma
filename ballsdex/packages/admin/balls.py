@@ -779,6 +779,78 @@ class Balls(app_commands.Group):
             interaction.client,
         )
 
+    @app_commands.command(name="transfer_inventory")
+    @app_commands.checks.has_any_role(*settings.root_role_ids)
+    async def inventory_balls_transfer(
+        self,
+        interaction: discord.Interaction[BallsDexBot],
+        from_user: discord.User,
+        user: discord.User,
+    ):
+        """
+        Transfer an entire inventory from one user to another.
+
+        Parameters
+        ----------
+        from_user: discord.User
+            The user whose inventory will be transferred.
+        user: discord.User
+            The user receiving the inventory.
+        """
+
+        await interaction.response.defer(ephemeral=True)
+
+        if from_user.id == user.id:
+            await interaction.response.send_message(
+                "⚠️ You cannot transfer an inventory to the same user.",
+                ephemeral=True,
+            )
+            return
+
+        oldPlayer = await Player.get_or_none(discord_id=from_user.id)
+        newPlayer, _ = await Player.get_or_create(discord_id=user.id)
+
+        if not oldPlayer:
+            await interaction.followup.send(
+                "❌ Source player not found.",
+                ephemeral=True,
+            )
+            return
+
+        if not newPlayer:
+            await interaction.followup.send(
+                "❌ Target player not found.",
+                ephemeral=True,
+            )
+            return
+
+        balls = await BallInstance.filter(player=oldPlayer)
+
+        if not balls:
+            await interaction.followup.send(
+                "⚠️ This player has no balls to transfer.",
+                ephemeral=True,
+            )
+            return
+
+        transferred = 0
+        for ball in balls:
+            ball.player = newPlayer
+            await ball.save()
+            transferred += 1
+
+        await interaction.followup.send(
+            f"✅ Transferred **{len(balls)} balls** "
+            f"from `{oldPlayer.discord_id}` to `{newPlayer.discord_id}`.",
+            ephemeral=True,
+        )
+
+        await log_action(
+            f"{interaction.user} transferred {transferred} balls "
+            f"from {from_user.id} to {user.id}.",
+            interaction.client,
+        )
+
     @app_commands.command(name="gdrop", description="Drop any footballer.")
     @app_commands.checks.has_any_role(*settings.root_role_ids)
     async def gdrop(self, interaction: Interaction, footballer: BallEnabledTransform):
