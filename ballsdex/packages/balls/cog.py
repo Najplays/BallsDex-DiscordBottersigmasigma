@@ -11,6 +11,8 @@ from discord.ui import Button, View, button
 from tortoise.exceptions import DoesNotExist
 from tortoise.expressions import RawSQL
 from tortoise.functions import Count
+from collections import Counter, defaultdict
+from tortoise.expressions import F
 from datetime import datetime, timedelta
 import random
 from discord import Embed, Color
@@ -195,7 +197,6 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
             # 2) pricaxy check very hard like mbappe
             allowed = await inventory_privacy(self.bot, interaction, player, user_obj)
 
-            # sometime will return none or false...
             if not allowed:
                 await interaction.followup.send(
                     "This user's inventory is private.",
@@ -212,62 +213,79 @@ class Balls(commands.GroupCog, group_name=settings.players_group_cog_name):
         if regime:
             query = query.filter(ball__regime=regime)
 
-        total = await query.count()
-        if total < 1:
-            combined = " ".join(filter(None, [
-            str(special) if special else "",
-            str(countryball.country) if countryball else "",
-            str(regime.name) if regime else ""
-        ]))
-
-        # Pagination limits
         MAX_PAGES = 200
         ITEMS_PER_PAGE = 25
         MAX_ITEMS = MAX_PAGES * ITEMS_PER_PAGE
 
+        total = await query.count()
+
+        if not total:
+            ball_txt = countryball.country if countryball else ""
+            special_txt = special if special else ""
+            regime_txt = regime if regime else ""
+
+            if special_txt and ball_txt and regime_txt:
+                combined = f"{special_txt} {ball_txt} {regime_txt}"
+            elif special_txt:
+                combined = special_txt
+            elif ball_txt:
+                combined = ball_txt
+            elif regime_txt:
+                combined = regime_txt
+            else:
+                combined = ""
+
+            if user_obj == interaction.user:
+                await interaction.followup.send(
+                    f"You don't have any {combined} {settings.plural_collectible_name} yet.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    f"{user_obj.name} doesn't have any {combined} {settings.plural_collectible_name} yet."
+                )
+            return
+
         # Sortings
+        countryballs_list = None
+
         if sort:
             if sort == SortingChoices.duplicates:
+                all_balls = list(await query.prefetch_related("ball", "special").limit(MAX_ITEMS))
 
-                countryballs_list = list(await query.limit(MAX_ITEMS))
+                count_map = Counter(bi.ball_id for bi in all_balls)
+                grouped_map = defaultdict(list)
+                for bi in all_balls:
+                    grouped_map[bi.ball_id].append(bi)
 
-                # Count the duplicates per ball
-                from collections import Counter
-                ball_counts = Counter(b.ball_id for b in countryballs_list)
-
-                # Attach duplicates count temp
-                for b in countryballs_list:
-                    b._duplicates_count = ball_counts[b.ball_id]
-
-                # Sort by duplicates
-                countryballs_list.sort(key=lambda b: b._duplicates_count, reverse=reverse)
-
+                # Create list sorted by duplicate count, then by country
+                countryballs_list = sorted(
+                    all_balls,
+                    key=lambda bi: (-bi.favorite, bi.special.name if bi.special else ""),
+                    reverse=reverse  # applies reverse if requested
+                )
+                for ball_id, _ in count_map.most_common():  # most duplicates first
+                    countryballs_list.extend(grouped_map[ball_id])
             else:
-                # SQL lEVELS SORTED BY REAL FIELD
                 order_field = sort.value
                 descending = order_field.startswith("-")
                 field_name = order_field.lstrip("-")
 
-                # Apply the reverse correctly
                 if reverse:
                     order_field = field_name if descending else f"-{field_name}"
-                else:
-                    order_field = order_field
 
-                maybe_sorted = query.order_by(order_field, "ball__country")
-                countryballs_list = list(await maybe_sorted.limit(MAX_ITEMS))
-
+                query = query.order_by(order_field, "ball__country")
+                countryballs_list = list(await query.limit(MAX_ITEMS))
         else:
-            # Default sorting: favorite first
-            maybe_sorted = query.order_by("-favorite", "id")
-            countryballs_list = list(await maybe_sorted.limit(MAX_ITEMS))
+            query = query.order_by("-favorite", "id")
+            countryballs_list = list(await query.limit(MAX_ITEMS))
 
         # info content
         info_content = f"Showing first **{MAX_ITEMS} of {total} {settings.plural_collectible_name}.**\n\n*Use more specific filters to find what you’re looking for.*" if total > MAX_ITEMS else None
 
         # Paginator
         paginator = CountryballsViewer(interaction, countryballs_list)
-        content = info_content if user_obj == interaction.user else f"Viewing {user_obj.name}'s {settings.plural_collectible_name}" + (f" — {info_content}" if info_content else "")
+        content = info_content if user_obj == interaction.user else f"Viewing {user_obj.name}'s {settings.plural_collectible_name}" + (f" - {info_content}" if info_content else "")
         await paginator.start(content=content)
 
     @app_commands.command()

@@ -377,7 +377,7 @@ class BetMenu:
                     f"**FootballDex Bet concluded!**\n\n"
                     f"🏆 **{winner.user.name}** won the bet!\n"
                     f"💔 **{loser.user.name}** lost the bet.\n\n"
-                    f"**Winner takes all {len(all_balls)} players"
+                    f"**Winner takes all {len(all_balls)} players**"
                 )
                 self.embed.color = discord.Colour.green()
 
