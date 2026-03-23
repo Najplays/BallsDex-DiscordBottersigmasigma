@@ -1080,7 +1080,7 @@ class Claim(commands.GroupCog, name="packs"):
         # Perform transfer
         wallet_balance[sender_id] = sender_balance - packs
         wallet_balance[receiver_id] = wallet_balance.get(receiver_id, 0) + packs
-        log_channel = interaction.guild.get_channel(PACKLY_LOG_CHANNEL_ID)
+        log_channel = interaction.client.get_channel(PACKLY_LOG_CHANNEL_ID)
 
         if log_channel:
             log_embed = discord.Embed(
